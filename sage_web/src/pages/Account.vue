@@ -14,12 +14,12 @@ async function submit() {
 </script>
 <template>
   <section class="page">
-    <div class="page-head"><div><h1>Account</h1><p>{{ session.user?.username }} · {{ session.user?.role }}</p></div></div>
-    <div v-if="session.user?.must_change_password" class="callout"><b>Change your password to continue.</b></div>
-    <form class="card" style="max-width:420px;margin-top:14px" @submit.prevent="submit"><div class="card-b" style="display:grid;gap:12px">
-      <label class="lbl">Current password<input class="field" type="password" v-model="old" required></label>
-      <label class="lbl">New password (at least 10 characters)<input class="field" type="password" v-model="nw" minlength="10" required></label>
-      <button class="btn primary">Change password</button>
-    </div></form>
+    <div class="head"><div><h1>Account</h1><p>{{ session.user?.username }} · {{ session.user?.role }}</p></div></div>
+    <div v-if="session.user?.must_change_password" class="callout" style="max-width:420px;margin-bottom:18px"><span><b>Change your password to continue.</b> This shows on first sign-in and after an admin resets your password.</span></div>
+    <form class="form" @submit.prevent="submit">
+      <label class="lbl">Current password<input v-model="old" class="field" type="password" autocomplete="current-password" required></label>
+      <label class="lbl">New password (at least 10 characters)<input v-model="nw" class="field" type="password" minlength="10" autocomplete="new-password" required></label>
+      <div><button class="btn primary">Change password</button></div>
+    </form>
   </section>
 </template>

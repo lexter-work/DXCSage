@@ -204,3 +204,19 @@ async def test_users_cannot_touch_other_users_chats(client, app, script, fake_rf
     await client.post("/api/auth/login", json={"username": "bob", "password": "bob-password-1"})
     assert (await client.get(f"/api/chats/{cid}/messages")).status_code == 404
     assert (await client.post(f"/api/chats/{cid}/runs", json={"text": "x"})).status_code == 404
+
+
+async def test_own_run_info_has_steps_system_and_no_payloads(client, app, script, fake_rfc):
+    cid = await setup_world(client, app, fake_rfc)
+    script.turns = [[ToolUse("c1", "quick_wf", {"system_name": "TS3"}), Done(3, 4)], [TextDelta("ok"), Done(1, 1)]]
+    run_id = await run_to_end(client, app, cid)
+    info = (await client.get(f"/api/runs/{run_id}")).json()
+    assert info["run"]["status"] == "done" and info["run"]["tokens_in"] == 4
+    call = info["tool_calls"][0]
+    assert call["workflow"] == "quick_wf" and call["system"]["label"] == "TS3" and call["steps"] == []
+    assert "input" not in call and "output" not in call
+    ev = await client.get(f"/api/runs/{run_id}/events")
+    assert '"ts"' in ev.text
+    await client.post("/api/auth/logout")
+    await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pass-12345"})
+    assert (await client.get("/api/runs/9999")).status_code == 404

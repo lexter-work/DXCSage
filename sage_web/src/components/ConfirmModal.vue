@@ -4,11 +4,11 @@ defineEmits<{ confirm: []; cancel: [] }>()
 </script>
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-bg" @click.self="$emit('cancel')">
-      <div class="modal" role="alertdialog" aria-modal="true">
-        <h2 style="margin:0 0 8px;font-size:15px">{{ title }}</h2>
-        <p class="muted" style="margin:0 0 16px">{{ text }}</p>
-        <div class="row" style="justify-content:flex-end">
+    <div v-if="open" class="modal-bg" @click.self="$emit('cancel')" @keydown.esc="$emit('cancel')">
+      <div class="modal" role="alertdialog" aria-modal="true" :aria-label="title">
+        <h2>{{ title }}</h2>
+        <p>{{ text }}</p>
+        <div class="actions">
           <button class="btn" @click="$emit('cancel')">Cancel</button>
           <button class="btn danger" @click="$emit('confirm')">{{ confirmLabel }}</button>
         </div>

@@ -1,13 +1,28 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { get, post, put } from '../../api'
 import StatusPill from '../../components/StatusPill.vue'
+import Icon from '../../components/Icon.vue'
 import { toast } from '../../toast'
 
 const { name, systemId } = useRoute().params as { name: string; systemId: string }
 const base = `api/workflows/${name}/systems/${systemId}`
 const guide = ref<any | null>(null), wf = ref<any | null>(null), binding = ref<any | null>(null), values = ref<Record<string, string>>({})
+
+const GROUPS: [string, string[]][] = [['Connection', ['reachable', 'login']], ['Function modules', ['fm_exists', 'fm_authorized']], ['Tables', ['table_readable']], ['Settings', ['setting']]]
+const grouped = computed(() => GROUPS.map(([label, kinds]) => [label, (guide.value?.steps ?? []).filter((s: any) => kinds.includes(s.kind))] as const).filter(([, l]) => l.length))
+const total = computed(() => guide.value?.steps.length ?? 0)
+const passed = computed(() => (guide.value?.steps ?? []).filter((s: any) => s.status === 'pass').length)
+const checked = computed(() => (guide.value?.steps ?? []).some((s: any) => s.status))
+const firstBad = computed(() => (guide.value?.steps ?? []).find((s: any) => s.status && s.status !== 'pass'))
+const headline = computed(() => {
+  if (!checked.value) return 'Not checked yet. Run the health check to see what is missing.'
+  const n = `${passed.value} of ${total.value} checks pass.`
+  if (firstBad.value) return `${n} Fix ${firstBad.value.key || firstBad.value.kind} to finish setup.`
+  return binding.value?.status === 'enabled' ? `${n} The workflow is enabled on this system.` : `${n} You can enable the workflow.`
+})
+
 async function load() {
   guide.value = await get(`${base}/guide`)
   wf.value = (await get<any[]>('api/workflows')).find(w => w.name === name)
@@ -21,42 +36,52 @@ async function disable() { await post(`${base}/disable`); await load() }
 async function copyMarkdown() {
   try { await navigator.clipboard.writeText(await get(`${base}/guide?format=markdown`)); toast('Guide copied as Markdown') } catch (e) { toast(e) }
 }
+async function copyAuth() {
+  const rows = (guide.value?.auth_table ?? []).map((r: string[]) => r.join('\t')).join('\n')
+  try { await navigator.clipboard.writeText('Object\tField\tValue\n' + rows); toast('Authorization table copied') } catch (e) { toast(e) }
+}
 onMounted(() => load().catch(toast))
 </script>
 <template>
-  <section class="page" v-if="guide">
-    <div class="page-head"><div><h1><span class="mono">{{ guide.workflow }}</span> on {{ guide.system.label }}</h1>
-      <p>{{ guide.description }}</p></div><span class="spacer" />
-      <router-link class="btn" to="/admin/workflows">Back</router-link></div>
-    <div class="card" style="margin-bottom:14px"><div class="card-b row">
-      <StatusPill :status="binding?.status" /><span class="muted">health</span><StatusPill :status="binding?.health" />
-      <span class="spacer" />
+  <section v-if="guide" class="page">
+    <div class="crumb"><router-link to="/admin/workflows">Workflows</router-link><span>/</span><span class="mono">{{ guide.workflow }}</span><span>/</span><span>{{ guide.system.label }}</span></div>
+    <div class="head"><div><h1><span class="mono">{{ guide.workflow }}</span> on {{ guide.system.label }}</h1><p>{{ guide.description }}</p></div></div>
+    <p class="bigline">{{ headline }}</p>
+    <div class="bar-prog" aria-hidden="true"><i :style="{ width: total ? (100 * passed / total) + '%' : '0%' }" /></div>
+    <span class="muted" style="font-size:12.5px">{{ guide.system.sid }} · client {{ guide.system.client }} · RFC user <span class="mono">{{ guide.system.rfc_user }}</span></span>
+    <div class="actbar">
+      <StatusPill :status="binding?.status" /><span class="muted" style="font-size:12.5px">health</span><StatusPill :status="binding?.health" :label="binding?.health === 'unknown' ? 'Not checked' : undefined" />
+      <span class="sp" />
       <button class="btn" @click="check">Run health check</button>
       <button class="btn" @click="copyMarkdown">Copy guide as Markdown</button>
       <button v-if="binding?.status !== 'enabled'" class="btn primary" @click="enable">Enable</button>
       <button v-else class="btn danger" @click="disable">Disable</button>
-    </div></div>
+    </div>
 
-    <div v-if="wf?.settings.length" class="card" style="margin-bottom:14px"><div class="card-h"><h2>Settings for this system</h2></div>
-      <div class="card-b" style="display:grid;gap:10px">
-        <label v-for="s in wf.settings" :key="s.key" class="lbl">{{ s.label }}<input class="field" v-model="values[s.key]">
-          <span class="muted">{{ s.description }}</span></label>
-        <div><button class="btn" @click="saveSettings">Save settings</button></div>
-      </div></div>
-
-    <div class="card" style="margin-bottom:14px"><div class="card-h"><h2>Setup steps on {{ guide.system.sid }} (client {{ guide.system.client }})</h2>
-      <span class="sub">RFC user <span class="mono">{{ guide.system.rfc_user }}</span></span></div>
-      <div class="card-b" style="display:grid;gap:12px">
-        <div v-for="(s, i) in guide.steps" :key="i" style="border-bottom:1px solid var(--line);padding-bottom:10px">
-          <div class="row"><b>{{ i + 1 }}. {{ s.title }}</b><StatusPill :status="s.status" /></div>
-          <p style="margin:4px 0">{{ s.text }}</p>
-          <p v-if="s.message" class="muted mono" style="margin:0">Last check: {{ s.message }}</p>
-          <details v-if="s.source_text"><summary>ABAP source ({{ s.source }})</summary><pre class="out">{{ s.source_text }}</pre></details>
-        </div>
-      </div></div>
-
-    <div class="card"><div class="card-h"><h2>Authorizations for the RFC user's role</h2><span class="sub">Hand this table to Basis</span></div>
-      <div class="card-b"><table><thead><tr><th>Object</th><th>Field</th><th>Value</th></tr></thead><tbody>
-        <tr v-for="(r, i) in guide.auth_table" :key="i"><td class="mono">{{ r[0] }}</td><td class="mono">{{ r[1] }}</td><td class="mono">{{ r[2] }}</td></tr></tbody></table></div></div>
+    <div class="guide">
+      <div>
+        <template v-for="[group, list] in grouped" :key="group">
+          <div class="sgroup">{{ group }}</div>
+          <div v-for="(s, i) in list" :key="group + i" class="req" :class="s.status === 'pass' ? 'pass' : s.status === 'warn' ? 'warn' : s.status ? 'fail' : 'none'">
+            <span class="mark"><Icon :name="s.status === 'pass' ? 'check' : s.status ? 'alert' : 'chev'" /></span>
+            <span class="t"><span v-if="s.key">{{ s.kind }}:</span> {{ s.key || s.kind }}</span>
+            <StatusPill :status="s.status" :label="s.status ? undefined : 'Not checked'" />
+            <span class="x">{{ s.text }}</span>
+            <span v-if="s.message" class="m">Last check: {{ s.message }}</span>
+            <details v-if="s.source_text"><summary>ABAP source ({{ s.source }})</summary><pre>{{ s.source_text }}</pre></details>
+            <span v-if="s.kind === 'setting' && wf?.settings.length" class="x"><button class="btn sm" style="margin-top:6px" @click="($refs['set_' + s.key] as any)?.[0]?.focus()">Set {{ s.key.replace(/_/g, ' ') }}</button></span>
+          </div>
+        </template>
+      </div>
+      <div class="gside">
+        <div v-if="wf?.settings.length" class="sidecard"><h3>Settings for this system</h3><div class="in">
+          <label v-for="s in wf.settings" :key="s.key" class="lbl">{{ s.label }}<input :ref="'set_' + s.key" v-model="values[s.key]" class="field mono"><span class="help">{{ s.description }}</span></label>
+          <div><button class="btn sm" @click="saveSettings">Save settings</button></div></div></div>
+        <div class="sidecard"><h3>Authorizations for the RFC user's role<span class="sp" /><button class="btn sm ghost" @click="copyAuth">Copy</button></h3>
+          <div class="tablewrap"><table><thead><tr><th>Object</th><th>Field</th><th>Value</th></tr></thead><tbody>
+            <tr v-for="(r, i) in guide.auth_table" :key="i"><td class="mono">{{ r[0] }}</td><td class="mono">{{ r[1] }}</td><td class="mono">{{ r[2] }}</td></tr></tbody></table></div>
+          <div class="in" style="padding-top:8px"><span class="help">Hand this table to Basis.</span></div></div>
+      </div>
+    </div>
   </section>
 </template>

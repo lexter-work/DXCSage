@@ -121,6 +121,23 @@ async def _own_run(svc, run_id, user):
     return run
 
 
+@router.get("/runs/{run_id}")
+async def run_info(run_id: int, request: Request, user: dict = Depends(current_user)):
+    """Own-run summary for the chat: status, timing, tokens, and the steps of each workflow call (no inputs or outputs)."""
+    svc = _svc(request)
+    run = await _own_run(svc, run_id, user)
+    calls = await svc.db.fetchall(
+        "SELECT id,provider_call_id,workflow,system_id,status,started_at,ended_at FROM tool_calls WHERE run_id=? ORDER BY id", (run_id,))
+    for c in calls:
+        c["steps"] = await svc.db.fetchall(
+            "SELECT seq,kind,attempt,name,status,created_at FROM tool_steps WHERE tool_call_id=? AND kind IN ('task','poll') ORDER BY seq,attempt",
+            (c["id"],))
+        sys_ = await svc.systems.get(c["system_id"]) if c["system_id"] else None
+        c["system"] = {"label": sys_["label"], "sid": sys_["sid"], "client": sys_["client"]} if sys_ else None
+    keep = ("id", "status", "started_at", "ended_at", "resume_at", "tokens_in", "tokens_out", "error")
+    return {"run": {k: run[k] for k in keep}, "tool_calls": calls}
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel(run_id: int, request: Request, user: dict = Depends(current_user)):
     svc = _svc(request)
@@ -137,10 +154,10 @@ async def events(run_id: int, request: Request, after: int = 0, user: dict = Dep
     async def gen():
         last, idle = after, 0
         while True:
-            rows = await svc.db.fetchall("SELECT id,type,data FROM run_events WHERE run_id=? AND id>? ORDER BY id", (run_id, last))
+            rows = await svc.db.fetchall("SELECT id,type,data,created_at FROM run_events WHERE run_id=? AND id>? ORDER BY id", (run_id, last))
             for r in rows:
                 last, idle = r["id"], 0
-                yield f"id: {r['id']}\ndata: {json.dumps({'type': r['type'], 'data': json.loads(r['data'])})}\n\n"
+                yield f"id: {r['id']}\ndata: {json.dumps({'type': r['type'], 'data': json.loads(r['data']), 'ts': r['created_at']})}\n\n"
             run = await svc.db.fetchone("SELECT status FROM runs WHERE id=?", (run_id,))
             if not rows and run["status"] in ("done", "failed", "cancelled"):
                 return

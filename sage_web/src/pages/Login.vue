@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { post } from '../api'
 import { loadMe } from '../session'
 import { toast } from '../toast'
+import logo from '../assets/dxc-logo.png'
 
 const router = useRouter()
 const username = ref(''), password = ref(''), busy = ref(false)
@@ -15,12 +16,28 @@ async function submit() {
 }
 </script>
 <template>
-  <div class="login"><form class="card" @submit.prevent="submit">
-    <div class="card-h"><h2>Sign in to DXC Sage</h2></div>
-    <div class="card-b stack" style="display:grid;gap:12px">
-      <label class="lbl">Username<input class="field" v-model="username" autocomplete="username" required></label>
-      <label class="lbl">Password<input class="field" type="password" v-model="password" autocomplete="current-password" required></label>
-      <button class="btn primary" :disabled="busy">Sign in</button>
+  <div class="login">
+    <div class="l">
+      <img :src="logo" alt="DXC Technology">
+      <div>
+        <h1>SAP work, run through approved workflows.</h1>
+        <p>Sage runs fixed SAP workflows on systems your admin registers. Every request, step and admin action is written to a hash-chained audit log.</p>
+      </div>
+      <ul>
+        <li><b>RFC only</b> · no SSH, no database clients</li>
+        <li><b>Read-only health checks</b> before any workflow runs</li>
+        <li><b>Claude or GPT</b> · keys held encrypted on the server</li>
+      </ul>
     </div>
-  </form></div>
+    <div class="r">
+      <form @submit.prevent="submit">
+        <h2>Sign in to Sage</h2>
+        <p>Use the local account your admin created.</p>
+        <label class="lbl">Username<input v-model="username" class="field" autocomplete="username" required></label>
+        <label class="lbl">Password<input v-model="password" class="field" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary" :disabled="busy">Sign in</button>
+        <span class="muted" style="font-size:12px">Too many failed attempts lock sign-in for 15 minutes.</span>
+      </form>
+    </div>
+  </div>
 </template>
