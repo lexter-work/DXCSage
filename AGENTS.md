@@ -17,3 +17,4 @@ This file is the one instruction file for every coding agent; `CLAUDE.md` only i
 - Health checks never call write or job-scheduling function modules.
 - Users and systems are disabled, never deleted. Chats are soft-deleted. `audit_log` is append-only.
 - UI uses relative URLs only; `GET /health` answers without auth.
+- UI work follows `mockup/skills/dxc-ui-design/SKILL.md` (DXC 2026 brand). Reference screens: `mockup/DXCSage_brand_mockup.html`.
