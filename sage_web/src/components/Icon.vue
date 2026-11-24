@@ -19,7 +19,8 @@ const P: Record<string, string> = {
   check: '<path d="M5 12l5 5L20 7"/>',
   alert: '<path d="M12 7v6M12 17h.01"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
-  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.6a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.5M12 17h.01"/>',
+  trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
 }
 defineProps<{ name: string }>()
 </script>

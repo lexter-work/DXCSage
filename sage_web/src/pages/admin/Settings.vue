@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { get, put } from '../../api'
 import Drawer from '../../components/Drawer.vue'
+import HelpBody from '../../components/HelpBody.vue'
+import HelpPopover from '../../components/HelpPopover.vue'
+import { SETTINGS_HELP } from '../../settingsHelp'
 import { toast } from '../../toast'
 
 const raw = ref<Record<string, any>>({}), sel = ref<string | null>(null), text = ref('')
@@ -34,13 +37,14 @@ onMounted(load)
         <template v-for="[label, list] in grouped" :key="label">
           <tr class="grp"><td colspan="2">{{ label }}</td></tr>
           <tr v-for="r in list" :key="r.key" class="click" tabindex="0" @click="open(r)" @keydown.enter="open(r)">
-            <td class="mono">{{ r.key }}</td>
+            <td><span class="keycell"><span class="mono">{{ r.key }}</span><HelpPopover v-if="SETTINGS_HELP[r.key]" :title="r.key" :help="SETTINGS_HELP[r.key]" /></span></td>
             <td class="wrap" style="color:var(--ink)"><span v-if="r.secret" class="pill" :class="r.set ? 'ok' : 'warn'">{{ r.set ? 'Set' : 'Not set' }}</span><span v-else class="mono">{{ short(r.value) }}</span></td>
           </tr>
         </template>
       </tbody></table></div>
 
     <Drawer :open="!!sel" :title="sel ?? ''" mono @close="sel = null">
+      <div v-if="sel && SETTINGS_HELP[sel]" class="drawerhelp"><HelpBody :help="SETTINGS_HELP[sel]" /></div>
       <label v-if="!isSecret(raw[sel ?? ''])" class="lbl">Value (JSON)<textarea v-model="text" class="field" rows="16" spellcheck="false" /></label>
       <label v-else class="lbl">New secret value (never shown again)<input v-model="text" class="field" type="password" autocomplete="new-password"></label>
       <div class="callout info"><span>{{ isSecret(raw[sel ?? '']) ? 'Stored encrypted with the master key. The current value is never shown.' : 'Saved values are validated as JSON. The change is written to the audit log.' }}</span></div>

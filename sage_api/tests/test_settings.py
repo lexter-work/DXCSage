@@ -33,3 +33,13 @@ async def test_secret_encrypted_masked_and_not_audited(settings_store, db):
 async def test_unknown_key_rejected(settings_store):
     with pytest.raises(KeyError):
         await settings_store.set("nope", 1, "admin")
+
+
+def test_every_setting_has_help_in_the_web_app():
+    """sage_web/src/settingsHelp.ts must name exactly the settings the backend defines."""
+    import re
+    from pathlib import Path
+    from sage.settings_store import DEFAULTS
+    ts = (Path(__file__).resolve().parents[2] / "sage_web" / "src" / "settingsHelp.ts").read_text(encoding="utf-8")
+    documented = set(re.findall(r"^  '([a-z_.]+)': \{", ts, re.M))
+    assert documented == set(DEFAULTS), (sorted(set(DEFAULTS) - documented), sorted(documented - set(DEFAULTS)))
