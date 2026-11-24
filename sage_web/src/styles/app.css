@@ -2,6 +2,7 @@
 .card th, .card td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
 .card th { color: var(--ink-3); font-weight: 500; font-size: 12px; }
 .card tr.click { cursor: pointer; } .card tr.click:hover { background: var(--hover); }
+a.nav, a.btn { text-decoration: none; }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .sdrawer-bg { position: fixed; inset: 0; background: rgba(20, 20, 15, .35); display: flex; justify-content: flex-end; z-index: 50; }
 .sdrawer { width: min(520px, 100%); height: 100%; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; }

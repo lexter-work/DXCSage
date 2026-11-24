@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { get, put } from '../../api'
 import DataTable from '../../components/DataTable.vue'
 import Drawer from '../../components/Drawer.vue'
-import StatusPill from '../../components/StatusPill.vue'
 import { toast } from '../../toast'
 
 const raw = ref<Record<string, any>>({}), sel = ref<string | null>(null), text = ref('')
@@ -24,7 +23,7 @@ onMounted(load)
   <section class="page">
     <div class="page-head"><div><h1>Settings</h1><p>All configuration lives here. Secret values are write-only.</p></div></div>
     <DataTable clickable :rows="rows" @select="open" :columns="[{key:'key',label:'Setting',mono:true},{key:'value',label:'Value',mono:true}]">
-      <template #value="{ row }"><StatusPill v-if="row.secret" :status="row.value === 'set' ? 'ok' : 'warn'" /><span v-else class="mono" style="word-break:break-all">{{ row.value.length > 90 ? row.value.slice(0, 90) + '…' : row.value }}</span></template>
+      <template #value="{ row }"><span v-if="row.secret" class="pill" :class="row.value === 'set' ? 'ok' : 'warn'">{{ row.value }}</span><span v-else class="mono" style="word-break:break-all">{{ row.value.length > 90 ? row.value.slice(0, 90) + '…' : row.value }}</span></template>
     </DataTable>
     <Drawer :open="!!sel" :title="sel ?? ''" @close="sel = null">
       <label class="lbl">{{ isSecret(raw[sel ?? '']) ? 'New secret value (never shown again)' : 'Value (JSON)' }}
