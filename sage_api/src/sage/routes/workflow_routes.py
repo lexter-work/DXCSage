@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 from sage.deps import admin_user, current_user
 from sage.guide import build_guide, guide_markdown
+from sage.sap.rfc import RfcError
+from sage.tasks.base import TaskContext
 from sage.workflow_setup import AccessError, SetupError
 
 router = APIRouter(prefix="/api")
@@ -61,6 +63,21 @@ async def _guard(coro):
 async def setup(name: str, system_id: int, body: Settings, request: Request, admin: dict = Depends(admin_user)):
     await _guard(_svc(request).setup.setup(name, system_id, body.settings, admin["username"]))
     return {"ok": True}
+
+
+@router.get("/workflows/{name}/systems/{system_id}/settings/{key}/options")
+async def setting_options(name: str, system_id: int, key: str, request: Request, admin: dict = Depends(admin_user)):
+    """Valid values for a setting, read from the system. SAP errors come back in the body so the page can fall back to typing."""
+    svc = _svc(request)
+    wf = svc.workflows.get(name)
+    system = await svc.systems.get(system_id)
+    if not wf or not system or not any(sp.key == key and sp.lookup for sp in wf.binding_settings):
+        raise HTTPException(404, "not_found")
+    task_ctx = TaskContext(system_id, svc.rfc, svc.settings, {}, svc.data_dir, system["label"])
+    try:
+        return {"options": await wf.setting_options(key, task_ctx), "error": None}
+    except RfcError as e:
+        return {"options": [], "error": f"{e.code}: {e.message}"}
 
 
 @router.post("/workflows/{name}/systems/{system_id}/enable")

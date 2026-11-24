@@ -16,6 +16,7 @@ class SettingSpec(BaseModel):
     label: str
     required: bool = False
     description: str = ""
+    lookup: bool = False     # the UI can list valid values from the system (see Workflow.setting_options)
 
 
 class Workflow(ABC):
@@ -37,6 +38,11 @@ class Workflow(ABC):
                 seen.add((r.kind, r.key))
                 out.append(r)
         return out
+
+    @classmethod
+    async def setting_options(cls, key: str, task_ctx) -> list[str]:
+        """Valid values for a binding setting whose SettingSpec has lookup=True. Read-only SAP reads only."""
+        raise NotImplementedError(key)
 
     @abstractmethod
     async def run(self, ctx, data: BaseModel) -> BaseModel: ...

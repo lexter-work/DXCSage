@@ -56,7 +56,14 @@ class SapReadinessCheck(Workflow):
                        guide="Create a variant for RC_COLLECT_ANALYSIS_DATA in SA38 and enter its name as the default variant here."),
     )
     binding_settings = (SettingSpec(key="default_variant", label="Default variant",
-                                    description="Used when the user gives no variant. Must exist for RC_COLLECT_ANALYSIS_DATA."),)
+                                    description="Used when the user gives no variant. Must exist for RC_COLLECT_ANALYSIS_DATA.", lookup=True),)
+
+    @classmethod
+    async def setting_options(cls, key, task_ctx):
+        if key != "default_variant":
+            raise KeyError(key)
+        r = await task_ctx.rfc.read_table(task_ctx.system_id, "VARID", ["VARIANT"], f"REPORT = '{PROGRAM}'", rows=500)
+        return sorted({row["VARIANT"] for row in r.rows if row["VARIANT"]})
 
     async def run(self, ctx, data: ReadinessInput) -> ReadinessOutput:
         cfg = await ctx.snapshot("notes_config", lambda: ctx.task_ctx.settings.get("readiness.prerequisite_notes"))

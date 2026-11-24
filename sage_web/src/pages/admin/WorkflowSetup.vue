@@ -23,11 +23,24 @@ const headline = computed(() => {
   return binding.value?.status === 'enabled' ? `${n} The workflow is enabled on this system.` : `${n} You can enable the workflow.`
 })
 
+// Valid values read from the system for settings that support a lookup (for example the report variants).
+const opts = ref<Record<string, { loading: boolean; list: string[]; error: string | null }>>({})
+async function loadOptions(key: string) {
+  opts.value[key] = { loading: true, list: [], error: null }
+  try {
+    const r = await get<{ options: string[]; error: string | null }>(`${base}/settings/${key}/options`)
+    opts.value[key] = { loading: false, list: r.options, error: r.error }
+  } catch (e: any) { opts.value[key] = { loading: false, list: [], error: e?.detail ?? String(e) } }
+}
+const lookup = (key: string) => opts.value[key]
+const missing = (key: string) => !!values.value[key] && !!lookup(key) && !lookup(key).error && !lookup(key).list.includes(values.value[key])
+
 async function load() {
   guide.value = await get(`${base}/guide`)
   wf.value = (await get<any[]>('api/workflows')).find(w => w.name === name)
   binding.value = wf.value.bindings.find((b: any) => String(b.system_id) === systemId)
   values.value = { ...(binding.value?.settings ?? {}) }
+  for (const s of wf.value.settings) if (s.lookup && !opts.value[s.key]) loadOptions(s.key)
 }
 async function saveSettings() { try { await put(base, { settings: values.value }); toast('Settings saved'); await load() } catch (e) { toast(e) } }
 async function check() { try { await post(`${base}/check`); await load() } catch (e) { toast(e) } }
@@ -75,7 +88,19 @@ onMounted(() => load().catch(toast))
       </div>
       <div class="gside">
         <div v-if="wf?.settings.length" class="sidecard"><h3>Settings for this system</h3><div class="in">
-          <label v-for="s in wf.settings" :key="s.key" class="lbl">{{ s.label }}<input :ref="'set_' + s.key" v-model="values[s.key]" class="field mono"><span class="help">{{ s.description }}</span></label>
+          <label v-for="s in wf.settings" :key="s.key" class="lbl">{{ s.label }}
+            <select v-if="s.lookup && lookup(s.key) && !lookup(s.key).error" :ref="'set_' + s.key" v-model="values[s.key]" class="field mono" :disabled="lookup(s.key).loading">
+              <option value="">{{ lookup(s.key).loading ? 'Reading variants from SAP…' : lookup(s.key).list.length ? 'Choose a variant' : 'No variants found' }}</option>
+              <option v-if="missing(s.key)" :value="values[s.key]">{{ values[s.key] }} (not found on this system)</option>
+              <option v-for="o in lookup(s.key).list" :key="o" :value="o">{{ o }}</option>
+            </select>
+            <input v-else :ref="'set_' + s.key" v-model="values[s.key]" class="field mono">
+            <span class="help">{{ s.description }}</span>
+            <span v-if="s.lookup && lookup(s.key)?.error" class="help bad">Could not read the list from SAP ({{ lookup(s.key).error }}). Type the name instead.</span>
+            <span v-else-if="s.lookup && lookup(s.key) && !lookup(s.key).loading && !lookup(s.key).list.length" class="help">No variant exists for RC_COLLECT_ANALYSIS_DATA on this system. Create one in SA38, then reload.</span>
+            <span v-if="missing(s.key)" class="help bad">This variant is not on the system. The workflow will fail until it exists.</span>
+            <button v-if="s.lookup" type="button" class="btn sm" style="justify-self:start" :disabled="lookup(s.key)?.loading" @click="loadOptions(s.key)">Reload from SAP</button>
+          </label>
           <div><button class="btn sm" @click="saveSettings">Save settings</button></div></div></div>
         <div class="sidecard"><h3>Authorizations for the RFC user's role<span class="sp" /><button class="btn sm ghost" @click="copyAuth">Copy</button></h3>
           <div class="tablewrap"><table><thead><tr><th>Object</th><th>Field</th><th>Value</th></tr></thead><tbody>

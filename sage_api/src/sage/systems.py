@@ -1,4 +1,6 @@
 """Registered SAP systems. Admin-only; never deleted, only disabled."""
+from cryptography.fernet import InvalidToken
+
 from sage.sap.rfc import RfcError, RfcParams
 from sage.util import iso
 
@@ -26,7 +28,12 @@ class SystemsService:
 
     async def load_params(self, system_id) -> RfcParams:
         r = await self._db.fetchone("SELECT * FROM systems WHERE id=?", (system_id,))
-        return RfcParams(r["ashost"], r["sysnr"], r["client"], r["rfc_user"], self._box.decrypt(r["rfc_password_enc"]))
+        try:
+            passwd = self._box.decrypt(r["rfc_password_enc"])
+        except InvalidToken:
+            # Happens when the master key volume was lost or replaced: the stored password is unreadable.
+            raise RfcError("LOGIN", "The stored RFC password cannot be decrypted. Enter the RFC password again.") from None
+        return RfcParams(r["ashost"], r["sysnr"], r["client"], r["rfc_user"], passwd)
 
     async def test(self, system_id) -> dict:
         try:
