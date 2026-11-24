@@ -8,6 +8,7 @@
   --bg:var(--canvas); --panel:var(--white); --sunken:#FBF9F7;
   --ink:#151517; --ink-2:#4D4D52; --line:#E4DFDA; --line-2:#D3CDC6;
   --accent:var(--royal); --accent-hover:#003A87; --accent-ink:var(--white);
+  --fill:#1D1D1F; --fill-ink:#F6F3F0; --fill-hover:#3A3A3D;
   --accent-soft:#ECE8E4;
   --user-bg:var(--charcoal); --user-ink:var(--canvas);
   --ok:#107C41; --ok-soft:color-mix(in srgb,#107C41 10%,var(--white));
@@ -23,6 +24,7 @@
   --bg:#131314; --panel:#1C1C1E; --sunken:#27272A;
   --ink:var(--canvas); --ink-2:#B8B8BD; --line:#323235; --line-2:#444447;
   --accent:var(--trueblue); --accent-hover:#6AA9FF; --accent-ink:#0F0F10;
+  --fill:#E4E2DF; --fill-ink:#131314; --fill-hover:#FFFFFF;
   --accent-soft:#2C2C30;
   --user-bg:#2A2A2D; --user-ink:var(--canvas);
   --ok:#6FD08C; --ok-soft:color-mix(in srgb,#6FD08C 14%,#1C1C1E);
@@ -77,8 +79,8 @@ main{min-width:0}
 .head .sp{flex:1}
 .btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:4px;border:1px solid var(--line-2);background:var(--panel);cursor:pointer;font-weight:500;font-size:13px;white-space:nowrap}
 .btn:hover{border-color:var(--ink-2)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
-.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.primary{background:var(--fill);border-color:var(--fill);color:var(--fill-ink);font-weight:600}
+.btn.primary:hover{background:var(--fill-hover);border-color:var(--fill-hover)}
 .btn.ghost{border-color:transparent;background:none}
 .btn.danger{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,transparent)}
 :root[data-theme="dark"] .btn.danger{color:var(--melon);border-color:color-mix(in srgb,var(--melon) 45%,transparent)}
@@ -151,8 +153,8 @@ td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabu
 .step::after{content:"";position:absolute;left:10px;top:32px;bottom:-10px;width:2px;background:var(--line)}
 .step:last-child::after{display:none}
 .step .mark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line-2);background:var(--panel);z-index:1}
-.step.done .mark{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.step.done::after{background:var(--accent)}
+.step.done .mark{background:var(--fill);border-color:var(--fill);color:var(--fill-ink)}
+.step.done::after{background:var(--fill)}
 .step.wait .mark{border-color:var(--gold);background:var(--warn-soft)}
 .step.wait .mark i{width:8px;height:8px;border-radius:50%;background:var(--gold)}
 .step .mark svg{width:12px;height:12px;stroke-width:3}
@@ -252,8 +254,8 @@ nav.side{width:216px;position:sticky;top:56px;height:calc(100vh - 56px);align-se
 .rail .rt{width:36px;height:30px;display:grid;place-items:center;border:0;border-radius:4px;background:none;cursor:pointer}
 .rail .rt:hover{background:var(--panel)}
 .rail .rt[aria-current="true"]{background:var(--panel);box-shadow:inset 3px 0 0 var(--accent)}
-.rail .newc{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.rail .newc:hover{background:var(--accent-hover);color:var(--accent-ink)}
+.rail .newc{background:var(--fill);color:var(--fill-ink);border-color:var(--fill)}
+.rail .newc:hover{background:var(--fill-hover);color:var(--fill-ink)}
 .chat.thc .top,.chat.thc .tlist,.chat.thc .thbar .ttl{display:none}
 .chat.thc .thbar{justify-content:center;padding:12px 0 0}
 .chat.thc .rail{display:flex}
@@ -289,7 +291,7 @@ tr.grp td{background:var(--sunken);font-size:11.5px;font-weight:600;color:var(--
 .actbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 0 18px;border-bottom:1px solid var(--line-2);margin-bottom:8px}
 .actbar .sp{flex:1}
 .bar-prog{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:12px 0 4px;max-width:420px}
-.bar-prog i{display:block;height:100%;background:var(--accent)}
+.bar-prog i{display:block;height:100%;background:var(--fill)}
 .sgroup{font-size:12px;font-weight:600;color:var(--ink-2);padding:18px 0 6px}
 .req{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:2px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
 .req .mark{width:22px;height:22px;border-radius:50%;display:grid;place-items:center}
