@@ -6,6 +6,12 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes: ["sage_data:/data", "sage_keys:/keys"]
     restart: unless-stopped
+  sage_web:
+    build: ./sage_web
+    ports: ["${SERVICE_BIND:-0.0.0.0}:29701:80"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [sage_api]
+    restart: unless-stopped
 volumes:
   sage_data:
   sage_keys:
