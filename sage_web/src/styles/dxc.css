@@ -470,3 +470,19 @@ tbody tr.click:focus-visible td{background:var(--sunken)}
 
 /* one grid row for the tab-row menu, the rest for the page (no stretched blank row) */
 @media (max-width:1000px){.shell{grid-template-rows:auto minmax(0,1fr)}}
+
+/* ---------- portrait / narrow: the menu stays a left sidebar, icons only, never expandable ---------- */
+@media (max-width:1000px){
+  .shell,.shell.navc{grid-template-columns:60px minmax(0,1fr);grid-template-rows:none}
+  nav.side,.shell.navc nav.side{position:sticky;top:56px;height:calc(100vh - 56px);align-self:start;width:60px;flex-direction:column;
+    overflow-x:hidden;overflow-y:auto;border-right:1px solid var(--line);border-bottom:0;padding:16px 8px;gap:2px;scrollbar-width:none}
+  nav.side::-webkit-scrollbar{display:none}
+  nav.side .nl,nav.side .count,.shell.navc .nl{display:none}
+  nav.side .nav,.shell.navc .nav{justify-content:center;width:100%;padding:8px 0}
+  nav.side .nlabel,.shell.navc .nlabel{display:block;font-size:0;padding:0;height:1px;background:var(--line);margin:10px 6px}
+  nav.side .nlabel:first-child{display:none}
+  .side .foot{display:block}
+  .navtg{display:none}
+  .nav[aria-current="page"]::before,a.nav.router-link-exact-active::before{left:-8px;right:auto;top:6px;bottom:6px;width:3px;height:auto;border-radius:0 2px 2px 0}
+}
+@media (max-width:1000px){.chat{height:calc(100vh - 56px);height:calc(100dvh - 56px)}}
