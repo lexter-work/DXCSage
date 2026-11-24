@@ -1,0 +1,11 @@
+services:
+  sage_api:
+    build: ./sage_api
+    ports: ["${SERVICE_BIND:-0.0.0.0}:29700:29700"]
+    env_file: [{path: .env, required: false}]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["sage_data:/data", "sage_keys:/keys"]
+    restart: unless-stopped
+volumes:
+  sage_data:
+  sage_keys:

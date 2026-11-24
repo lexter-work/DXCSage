@@ -1,0 +1,42 @@
+from abc import ABC, abstractmethod
+from typing import ClassVar
+
+from pydantic import BaseModel
+
+from sage.sap.requirements import LoginOk, Reachable, Requirement
+from sage.tasks.base import Task
+
+
+class SystemInput(BaseModel):
+    system_name: str
+
+
+class SettingSpec(BaseModel):
+    key: str
+    label: str
+    required: bool = False
+    description: str = ""
+
+
+class Workflow(ABC):
+    """The tool the model calls once. Runs fixed steps by calling shared tasks."""
+    name: ClassVar[str]
+    description: ClassVar[str]
+    Input: ClassVar[type[BaseModel]]
+    Output: ClassVar[type[BaseModel]]
+    durable: ClassVar[bool] = False
+    tasks: ClassVar[tuple[type[Task], ...]] = ()
+    extra_requirements: ClassVar[tuple[Requirement, ...]] = ()
+    binding_settings: ClassVar[tuple[SettingSpec, ...]] = ()
+
+    @classmethod
+    def requirements(cls) -> list[Requirement]:
+        seen, out = set(), []
+        for r in (Reachable(), LoginOk(), *[r for t in cls.tasks for r in t.requirements], *cls.extra_requirements):
+            if (r.kind, r.key) not in seen:
+                seen.add((r.kind, r.key))
+                out.append(r)
+        return out
+
+    @abstractmethod
+    async def run(self, ctx, data: BaseModel) -> BaseModel: ...

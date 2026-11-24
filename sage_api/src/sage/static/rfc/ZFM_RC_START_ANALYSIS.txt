@@ -1,0 +1,253 @@
+ZFM_RC_START_ANALYSIS — custom RFC wrapper for scheduling RC_COLLECT_ANALYSIS_DATA without XBP
+=================================================================================================
+
+WHY THIS EXISTS
+----------------
+domain.py's schedule_job_via_classic_rfc() originally called JOB_OPEN,
+JOB_SUBMIT, and JOB_CLOSE directly over RFC, expecting to avoid the XBP
+interface (BAPI_XMI_LOGON) and its TXMILOGON (SM30) whitelisting
+requirement entirely.
+
+**That was tried against a live system (TS3, 2026-09-03) and failed
+immediately:**
+
+    ABAPRuntimeError: 3 (rc=3): key=CALL_FUNCTION_NOT_REMOTE,
+    message=Function module "JOB_OPEN" cannot be called 'remotely'.
+
+This is not an authorization problem and no config change fixes it.
+Modern SAP kernels simply do not release JOB_OPEN/JOB_SUBMIT/JOB_CLOSE
+as remote-enabled - that flag lives on the function module itself
+(Attributes tab > Processing type in SE37), and SAP ships all three
+without it. That restriction only blocks the *network* hop (an external
+RFC client calling in), not an ordinary ABAP statement calling one
+function module from another *inside* the same system - so the fix is
+the same shape as ZFM_RC_FETCH_ANALYSIS.txt's fix for GUI_DOWNLOAD:
+skip the blocked hop by wrapping the work in a function module that is
+itself remote-enabled, and let it do the JOB_OPEN/JOB_SUBMIT/JOB_CLOSE
+sequence locally, where none of them are being called "remotely" at all.
+
+This file is what to create in the target system for
+schedule_job_via_classic_rfc() to call successfully. Once created, this
+is the supported scheduling path in this capability. It needs no
+BAPI_XMI_LOGON call and no TXMILOGON whitelisting - the cost moves from
+a Basis-side SM30 entry to an ABAP-side custom object instead.
+
+**Scoped to exactly one report, by construction, not by a runtime
+check.** This capability only ever schedules RC_COLLECT_ANALYSIS_DATA,
+so that program name is hardcoded directly in STEP 3's source below
+rather than accepted as a caller-supplied RFC import parameter. There
+is no PROGRAM parameter on this function module's interface at all, so
+there's nothing for a caller to override - a plain-value comparison in
+ABAP isn't needed to defend against it. Widening this wrapper to submit
+more than one report would mean adding a PROGRAM import back plus a
+matching allowlist check; don't do that without deliberately deciding
+to reuse this wrapper for something else.
+
+
+WHAT'S CONFIRMED vs. STILL OPEN
+--------------------------------
+CONFIRMED:
+  - JOB_OPEN/JOB_SUBMIT/JOB_CLOSE's parameter interfaces below are the
+    real, standard signatures for these three function modules - they
+    are extremely stable, well-documented, and used internally by SAP's
+    own batch scheduling UI (SM36/SM37) on every release.
+  - Calling them from inside another function module (rather than over
+    RFC directly) is unaffected by CALL_FUNCTION_NOT_REMOTE, since that
+    check only fires for an incoming RFC call, not an internal
+    "CALL FUNCTION" statement.
+
+NOT CONFIRMED (same "ship it, verify before real use" posture as every
+other custom function module in this codebase):
+  - Whether your target release's JOB_SUBMIT signature matches exactly
+    (a handful of optional parameters have shifted across releases -
+    none used below are unusual ones, but verify in SE37's own
+    interface documentation for your system before activating).
+  - The authorization object gating background-job creation for the RFC
+    user - S_BTCH_JOB is the standard one and is used below, but your
+    security team may scope it differently. This only governs *whether*
+    the caller may release a job at all.
+
+
+STEP 1 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH if another capability's RFC setup already created
+it - all mcp_architecture_PH custom RFC function modules share this one
+group, regardless of which capability they belong to. Otherwise:
+
+  Function group: ZFG_MCPARCHPH
+  Short text:     Custom RFC utilities for mcp_architecture_PH (SAP MCP)
+
+
+STEP 2 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_RC_START_ANALYSIS
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Schedule RC_COLLECT_ANALYSIS_DATA as an immediate background job (NO XBP)
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name   Type spec        Pass Value  Optional  Default
+    --------------   ---------        ----------  --------  -------
+    JOBNAME           TYPE BTCJOB      CHECKED     no        -
+    VARIANT             TYPE RALDB-VARIANT  CHECKED no        -
+
+    Both required - RC_COLLECT_ANALYSIS_DATA has mandatory
+    selection-screen fields with no defaults (see domain.py's module
+    docstring and STEP 4's known result below), so a blank VARIANT
+    always fails with JOB_SUBMIT_FAILED anyway; there is no point
+    accepting one. There is no PROGRAM parameter - the report is fixed
+    in STEP 3's source.
+
+  Export tab:
+    Parameter name    Typing   Associated Type   Pass Value  Optional
+    ---------------   ------   ---------------   ----------  --------
+    REAL_JOBNAME       TYPE     BTCJOB             CHECKED     yes
+    JOBCOUNT             TYPE     BTCJOBCNT          CHECKED     yes
+
+  Exceptions tab:
+    JOB_OPEN_FAILED
+    JOB_SUBMIT_FAILED
+    JOB_CLOSE_FAILED
+    NO_AUTHORIZATION
+
+  NOTE - Pass Value MUST be checked on every parameter, same reasoning
+  ZFM_RR_ROLE_AUTH_CHANGE.txt's STEP 3 note gives: RFC has no way to pass
+  a reference across a network boundary.
+
+
+STEP 3 — Source code
+------------------------
+Paste into the Source Code tab, below the FUNCTION/ENDFUNCTION frame
+SE37 already generated for you.
+
+--------------------------------------------------------------------
+  DATA: lv_jobname  TYPE btcjob,
+        lv_jobcount TYPE btcjobcnt.
+
+  CONSTANTS: lc_program TYPE sy-repid VALUE 'RC_COLLECT_ANALYSIS_DATA'.
+
+  lv_jobname = jobname.
+
+* --- authorization check: caller must be allowed to schedule
+*     background jobs. S_BTCH_JOB/JOBACTION=RELE is the standard object
+*     for releasing a job to run - adjust to your security team's
+*     actual scoping if this needs to be narrower (e.g. per JOBGROUP).
+  AUTHORITY-CHECK OBJECT 'S_BTCH_JOB'
+    ID 'JOBACTION' FIELD 'RELE'
+    ID 'JOBGROUP'  DUMMY.
+  IF sy-subrc <> 0.
+    RAISE no_authorization.
+  ENDIF.
+
+* --- open the job. This is a LOCAL call - JOB_OPEN's own
+*     "not remote-enabled" flag only blocks an external caller from
+*     reaching it directly; calling it from inside this wrapper is a
+*     completely ordinary internal call. ---
+  CALL FUNCTION 'JOB_OPEN'
+    EXPORTING
+      jobname              = lv_jobname
+    IMPORTING
+      jobcount             = lv_jobcount
+    EXCEPTIONS
+      cant_create_job      = 1
+      invalid_job_data     = 2
+      job_create_canceled  = 3
+      OTHERS               = 4.
+  IF sy-subrc <> 0.
+    RAISE job_open_failed.
+  ENDIF.
+
+* --- submit the report as the job's one step. VARIANT is optional -
+*     JOB_SUBMIT has no free-selection-table parameter, so ad hoc
+*     selections aren't possible here; the report runs with the named
+*     variant's saved values, or its own defaults if variant is blank.
+*     REPORT is fixed to lc_program - there is no caller-supplied
+*     program name on this wrapper's interface at all. ---
+  CALL FUNCTION 'JOB_SUBMIT'
+    EXPORTING
+      authcknam                       = sy-uname
+      jobcount                        = lv_jobcount
+      jobname                         = lv_jobname
+      report                          = lc_program
+      variant                         = variant
+    EXCEPTIONS
+      bad_priparams                   = 1
+      bad_xpgflags                    = 2
+      invalid_jobdata                 = 3
+      jobname_missing                 = 4
+      job_notex                       = 5
+      job_submit_active                = 6
+      lock_failed                     = 7
+      program_missing                 = 8
+      prog_abap_and_variant_specified = 9
+      OTHERS                          = 10.
+  IF sy-subrc <> 0.
+    RAISE job_submit_failed.
+  ENDIF.
+
+* --- release the job to start immediately. ---
+  CALL FUNCTION 'JOB_CLOSE'
+    EXPORTING
+      jobcount              = lv_jobcount
+      jobname                = lv_jobname
+      strtimmed              = 'X'
+    EXCEPTIONS
+      cant_start_immediate  = 1
+      deadline_not_allowed  = 2
+      invalid_startdate     = 3
+      jobname_missing       = 4
+      job_close_failed      = 5
+      job_nosteps           = 6
+      job_notex              = 7
+      lock_failed            = 8
+      OTHERS                  = 9.
+  IF sy-subrc <> 0.
+    RAISE job_close_failed.
+  ENDIF.
+
+  real_jobname = lv_jobname.
+  jobcount     = lv_jobcount.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module.
+
+
+STEP 4 — Test in SE37 before pointing the MCP capability at it
+------------------------------------------------------------------
+  1. Call ZFM_RC_START_ANALYSIS via SE37's test screen (F8) with no
+     VARIANT. Confirm in SM37 that a job appears.
+
+     KNOWN RESULT ON A LIVE SYSTEM (TS3, 2026-09-07): this step raises
+     JOB_SUBMIT_FAILED with message XM 242 "No variant specified"
+     instead. RC_COLLECT_ANALYSIS_DATA has mandatory selection-screen
+     fields with no defaults (see domain.py's module docstring), so it
+     cannot run with a blank selection screen at all - this is expected
+     for this specific report, not a bug in the wrapper. JOB_OPEN having
+     already succeeded by this point confirms the wrapper itself is
+     working; skip straight to step 2 below.
+  2. Create a real variant on RC_COLLECT_ANALYSIS_DATA (SE38 -> the
+     report -> Goto -> Variants -> Save as Variant) with the selections
+     you want, then call again with VARIANT = that variant's name.
+     Confirm in SM37 that the right selections were used (job log, or
+     TBTCP for the step detail).
+  3. Only then point the RFC user in config_sap_systems.json's `rfc`
+     block at a system where this has been verified, and call
+     tool_sapRC_startAnalysis for real with
+     confirmed=True.
+
+     KNOWN RESULT ON A LIVE SYSTEM (TS3, 2026-09-08): step 3 raised
+     NO_AUTHORIZATION even though the identical VARIANT had already
+     worked fine in SE37 under an interactive user (step 1/2). The
+     dedicated RFC service user (e.g. ts3rfc in config_sap_systems.
+     json) is a different user than whoever ran the SE37 test, and RFC/
+     background service users routinely lack S_BTCH_JOB with
+     JOBACTION=RELE by default even when a dialog user has it - that's
+     the first thing to check with Basis (PFCG/SU01 on the RFC user).
+     If ST01/STAUTHTRACE shows nothing for that user even with a wide
+     enough time window and correct client/user filter, don't take that
+     as proof the AUTHORITY-CHECK passed - confirm with a debugger
+     breakpoint instead.

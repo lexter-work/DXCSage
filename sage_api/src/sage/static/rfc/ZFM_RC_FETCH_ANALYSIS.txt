@@ -1,0 +1,215 @@
+ZFM_RC_FETCH_ANALYSIS — custom RFC function module for downloading the Readiness Check archive
+=======================================================================================================
+
+WHY THIS EXISTS
+----------------
+Step 4 of the SAP Readiness Check process ("Download Analysis Data")
+uses GUI_DOWNLOAD (or CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD) to send the
+generated ZIP to the SAP GUI client's own machine - the presentation
+server. That has no RFC or SSH equivalent: neither reaches "whatever
+machine has SAP GUI open right now," only the application server itself.
+
+The fix is not to intercept that download - it's to skip it. Whatever
+code path builds the ZIP archive (as an XSTRING in memory, necessarily,
+since that's what GUI_DOWNLOAD needs to send) can be called directly and
+have that XSTRING returned straight back over RFC instead - no
+presentation-server hop, no application-server file write either. This
+file is what to create in the target system for domain.py's
+download_readiness_check_archive() to call.
+
+
+WHAT'S CONFIRMED vs. STILL OPEN — read this before anything else
+--------------------------------------------------------------------
+Unlike ZFM_SIMPLIFICATION_ITEM_CHECK.txt (sap_addon_uninstall) and
+ZFM_RR_ROLE_AUTH_CHANGE.txt (sap_role_remediation), which were built from
+a real system's report source or well-documented table structures,
+**nothing about RC_COLLECT_ANALYSIS_DATA's internal implementation is
+confirmed here** - no real system's source for this specific report was
+available while writing this. What IS confirmed: the RFC interface
+below (import/export/exceptions, all built-in types) will activate as-is
+- it needs no SAP-specific class to exist. What is NOT confirmed, and is
+the one thing standing between this and a working tool:
+
+Which class/method actually builds the ZIP archive inside
+  RC_COLLECT_ANALYSIS_DATA, callable independently of the GUI_DOWNLOAD
+  call that follows it.
+
+That question is PARTLY resolved for TS3: RC_COLLECT_ANALYSIS_DATA saves
+the completed ZIP as an XSTRING in SRTM_DATAX, and the same result can be
+read through CL_RC_COLLECT_CLIENT_HANDLER=>SELECT_W_CLT_CONSIDRATION. The
+class, method, and SRTM_DATAX/XTEXT field are confirmed to exist on TS3
+exactly as used below.
+
+**RESOLVED for TS3 (2026-09-18, debugger breakpoint inside
+LZFG_MCPARCHPHU03, live call to ZFM_RC_FETCH_ANALYSIS):** the client-
+rewrite theory was correct - actual values read off LS_SRTM_DATAX after
+a real, successful call were:
+
+    TRIGID     = 999999999   (matches the original guess)
+    TRIGOFFSET = 999991810   (does NOT match the original guess of
+                               999999999 - confirms SELECT_W_CLT_
+                               CONSIDRATION's internal client-rewrite
+                               changes the last digits)
+    SUBID      = 222         (matches the original guess)
+
+LS_SRTM_DATAX-XTEXT came back populated (494935 bytes, non-initial), i.e.
+a real archive - SY-SUBRC 0. STEP 3's source below has been updated to
+use TRIGOFFSET = 999991810. TRIGID and SUBID were already correct.
+
+**Still open:** whether 999991810 is itself portable across systems/runs,
+or specific to this one TS3 collection run and client. It was read from
+one live call, not derived from a documented formula - if this function
+module returns ARCHIVE_NOT_FOUND on another system or after a new
+collection run, re-do the debugger walk below rather than assuming this
+exact number still applies.
+
+HOW TO FIND IT (same method ZFM_SIMPLIFICATION_ITEM_CHECK.txt's
+confirmed calls were found by):
+  1. SE38 -> RC_COLLECT_ANALYSIS_DATA -> set a breakpoint on
+     CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD (Breakpoint at ->
+     Breakpoint at Statement, or a session breakpoint on that class's
+     method). Run the report for real, click "Download Analysis Data",
+     and let it stop there.
+  2. Walk up the call stack (Debugger -> Call Stack) from that
+     breakpoint. Somewhere a few frames up, a local variable holds the
+     complete ZIP as raw bytes (XSTRING) or as a CL_ABAP_ZIP instance
+     about to be turned into bytes - that's the value STEP 4 needs.
+  3. If it's a CL_ABAP_ZIP instance rather than raw bytes already, its
+     own SAVE( ) method returns the XSTRING directly - no need to
+     reverse-engineer anything past that point.
+  4. If GUI_DOWNLOAD isn't hit at all (some releases stream the archive
+     through a different API, e.g. a Fiori-based download or
+     CL_BCS_MIME_HANDLER-adjacent mechanism), search the report's
+     includes (SE38 -> Utilities -> Find) for "ZIP" or "CL_ABAP_ZIP" -
+     archive-building code on any release is very likely to use that
+     class somewhere, breakpoint-or-not.
+
+This function module reads the latest completed buffered result. It does
+not rebuild the ZIP and does not call GUI_DOWNLOAD. JOBNAME and JOBCOUNT
+remain accepted for interface compatibility, but this lookup does not use
+them to select an historical run.
+
+
+STEP 1 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH if another capability's RFC setup already created
+it - all mcp_architecture_PH custom RFC function modules share this one
+group, regardless of which capability they belong to. Otherwise:
+
+  Function group: ZFG_MCPARCHPH
+  Short text:     Custom RFC utilities for mcp_architecture_PH (SAP MCP)
+
+
+STEP 2 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_RC_FETCH_ANALYSIS
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Return the Readiness Check ZIP archive directly over RFC
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name     Type spec       Pass Value  Optional  Default
+    ---------------     ---------       ----------  --------  -------
+    JOBNAME              TYPE BTCJOB     CHECKED     no        -
+    JOBCOUNT              TYPE BTCJOBCNT  CHECKED     no        -
+
+    JOBNAME/JOBCOUNT are the TBTCO identifiers this capability's
+    tool_sapRC_checkStatus already reads - required on
+    the interface so the caller always identifies which run it means,
+    even though STEP 3's source below doesn't use them to select a run
+    yet (if a system can only ever have one "current" collected result
+    at a time, they end up unused in the source; leave the source as-is,
+    they cost nothing to ignore there).
+
+  Export tab (NOT the Tables tab - STRING/XSTRING aren't flat types,
+  same reasoning ZFM_SIMPLIFICATION_ITEM_CHECK.txt's ITEMS parameter
+  documents):
+    Parameter name   Typing   Associated Type    Pass Value  Optional
+    --------------   ------   ---------------    ----------  --------
+    FILENAME          TYPE     STRING              CHECKED     yes
+    ZIP_DATA          TYPE     XSTRING             CHECKED     yes
+
+  Exceptions tab:
+    ARCHIVE_NOT_FOUND
+    ARCHIVE_BUILD_NOT_IMPLEMENTED  (legacy; no longer raised)
+    NO_AUTHORIZATION              (only if an approved check is added)
+
+  NOTE - Pass Value MUST be checked on every parameter, same reasoning
+  ZFM_RR_ROLE_AUTH_CHANGE.txt's STEP 3 note gives: RFC has no way to pass
+  a reference across a network boundary.
+
+
+STEP 3 — Source code
+------------------------
+Paste into the Source Code tab, below the FUNCTION/ENDFUNCTION frame
+SE37 already generated for you.
+
+--------------------------------------------------------------------
+DATA: ls_srtm_datax TYPE srtm_datax,
+      lv_filename   TYPE string.
+
+* --- authorization check: caller must be allowed to read Readiness
+* Authorization is enforced by the RFC user's SAP roles. Do not add an
+* unverified AUTHORITY-CHECK object here. If security requires an
+* application-level check, have Basis/security define and approve the
+* exact object and fields for this system first.
+
+* --------------------------------------------------------------------
+* CONFIRMED on TS3 (2026-09-18, debugger, real call, SY-SUBRC 0, XTEXT
+* populated) - see "WHAT'S CONFIRMED vs. STILL OPEN" above. TRIGOFFSET
+* is NOT 999999999 like TRIGID/SUBID - SELECT_W_CLT_CONSIDRATION rewrites
+* it per-client internally, so the raw literal differs from the other
+* two. Still open: whether 999991810 holds on other systems or after a
+* new collection run - re-confirm via debugger (STEP 4) if this starts
+* returning ARCHIVE_NOT_FOUND.
+  ls_srtm_datax = cl_rc_collect_client_handler=>select_w_clt_considration(
+    iv_trigid     = 999999999
+    iv_trigoffset = 999991810
+    iv_subid      = 222 ).
+
+  IF ls_srtm_datax-xtext IS INITIAL.
+    RAISE archive_not_found.
+  ENDIF.
+
+  lv_filename = |RC_ANALYSIS_{ sy-sysid }_{ sy-datum }.zip|.
+* --------------------------------------------------------------------
+
+  filename = lv_filename.
+  zip_data = ls_srtm_datax-xtext.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module and test it in SE37. The function should
+return ARCHIVE_NOT_FOUND when no completed buffered result exists, or the
+ZIP XSTRING when a completed Readiness Check result is available.
+
+
+STEP 4 — Test in SE37 before pointing the MCP capability at it
+------------------------------------------------------------------
+  0. DONE on TS3 (2026-09-18): the IV_TRIGID/IV_TRIGOFFSET/IV_SUBID
+     literals in STEP 3 were confirmed via a debugger breakpoint inside
+     LZFG_MCPARCHPHU03, during a real call to ZFM_RC_FETCH_ANALYSIS -
+     TRIGOFFSET was found to differ from the original guess (999991810,
+     not 999999999) and STEP 3's source was updated accordingly.
+     On a NEW system (not TS3) or if this starts returning
+     ARCHIVE_NOT_FOUND, re-do this: SE38 -> RC_COLLECT_ANALYSIS_DATA ->
+     breakpoint inside CL_RC_COLLECT_CLIENT_HANDLER=>
+     SELECT_W_CLT_CONSIDRATION (or on ZFM_RC_FETCH_ANALYSIS itself, as
+     was done here), run a real completed collection through it, read
+     the actual values off the call stack/structure fields - not the
+     ones hardcoded in STEP 3 - and update STEP 3's source if they
+     differ.
+  1. Confirm the target system has at least one finished Readiness Check
+     collection to download.
+  2. Call ZFM_RC_FETCH_ANALYSIS via SE37's test screen (F8).
+     ZIP_DATA won't render meaningfully in the test screen's raw-value
+     view - export it to a file (there's a "Save to file" option on the
+     hex/binary field display) and confirm it opens as a real ZIP with
+     the expected XML files inside, same content as a manual "Download
+     Analysis Data" for the same run.
+  4. Only then point the RFC user in config_sap_systems.json's `rfc`
+     block at a system where this has been verified, and call
+     tool_sapRC_downloadAnalysis for real.

@@ -1,0 +1,131 @@
+ZFM_CHECK_JOB_STATUS — custom RFC wrapper for reading a background job's TBTCO status
+=======================================================================================
+
+SHARED ACROSS CAPABILITIES - not owned by sap_readiness_check. Any capability
+that schedules a background job (tool_sapRC_startAnalysis today,
+others later) can poll job status through this one function module instead
+of each capability building its own.
+
+
+WHY THIS EXISTS
+----------------
+tool_sapRC_checkStatus previously read TBTCO directly over
+SSH/hdbsql (services/sap_hdbsql.py). On TS3, hdbuserstore is broken, so
+that path is blocked regardless of which capability calls it. TBTCO
+itself has no plain RFC-callable read the way JOB_OPEN/JOB_SUBMIT/
+JOB_CLOSE aren't remote-enabled either (see sap_readiness_check's
+ZFM_RC_START_ANALYSIS.txt) - BP_JOB_STATUS_GET is remote-enabled, but only
+returns a flat STATUS character, not a human label; the mapping to
+something readable is still done in domain.py, unverified against a live
+system the same way that mapping already was for the old hdbsql-based
+reader.
+
+Same shape as sap_readiness_check's ZFM_RC_START_ANALYSIS and
+ZFM_RC_FETCH_ANALYSIS: a thin remote-enabled wrapper that calls a standard
+function module internally, so the caller never needs hdbsql, SSH, or a
+direct TBTCO read at all.
+
+
+WHAT'S CONFIRMED vs. STILL OPEN
+--------------------------------
+CONFIRMED:
+  - BP_JOB_STATUS_GET is a standard, remote-enabled SAP function module
+    that reads TBTCO for one JOBNAME/JOBCOUNT and returns STATUS
+    (BTCSTATUS domain: same A/F/X/S/Y/P/etc. values domain.py's removed
+    hdbsql-based mapping already used).
+
+NOT CONFIRMED (ship it, verify before real use):
+  - Whether BP_JOB_STATUS_GET is callable directly over external RFC
+    without the CALL_FUNCTION_NOT_REMOTE failure JOB_OPEN hit - if SE37's
+    test screen (F8) succeeds against it directly, this wrapper is
+    unnecessary and any caller can call BP_JOB_STATUS_GET itself with no
+    custom function module at all. Only build ZFM_CHECK_JOB_STATUS if
+    that direct test fails the same way JOB_OPEN did.
+  - Whether your release's BP_JOB_STATUS_GET returns anything beyond
+    STATUS worth surfacing (e.g. a message) - not relied upon here.
+
+
+STEP 1 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH - all mcp_architecture_PH custom RFC function
+modules share this one group, regardless of which capability they
+belong to.
+
+
+STEP 2 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_CHECK_JOB_STATUS
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Read TBTCO status for one background job (NO hdbsql/SSH)
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name   Type spec        Pass Value  Optional  Default
+    --------------   ---------        ----------  --------  -------
+    JOBNAME           TYPE BTCJOB      CHECKED     no        -
+    JOBCOUNT          TYPE BTCJOBCNT   CHECKED     no        -
+
+  Export tab:
+    Parameter name    Typing   Associated Type   Pass Value  Optional
+    ---------------   ------   ---------------   ----------  --------
+    STATUS             TYPE     BTCSTATUS          CHECKED     yes
+
+  Exceptions tab:
+    JOB_NOT_FOUND
+
+  NOTE - Pass Value MUST be checked on every parameter, same reasoning
+  ZFM_RC_START_ANALYSIS.txt's STEP 2 note gives: RFC has no way to pass a
+  reference across a network boundary.
+
+
+STEP 3 — Source code
+------------------------
+Paste into the Source Code tab, below the FUNCTION/ENDFUNCTION frame
+SE37 already generated for you.
+
+--------------------------------------------------------------------
+  DATA: lv_status TYPE btcstatus.
+
+* --- local call - BP_JOB_STATUS_GET is standard SAP, reads TBTCO for
+*     one job. Called from inside this wrapper the same "local call,
+*     not remote" reasoning as ZFM_RC_START_ANALYSIS's JOB_OPEN/
+*     JOB_SUBMIT/JOB_CLOSE sequence - only needed if BP_JOB_STATUS_GET
+*     itself turns out not to be remote-enabled on your release; if
+*     SE37's direct test call succeeds, skip this wrapper and call
+*     BP_JOB_STATUS_GET directly instead. ---
+  CALL FUNCTION 'BP_JOB_STATUS_GET'
+    EXPORTING
+      jobname  = jobname
+      jobcount = jobcount
+    IMPORTING
+      status   = lv_status
+    EXCEPTIONS
+      OTHERS   = 1.
+  IF sy-subrc <> 0.
+    RAISE job_not_found.
+  ENDIF.
+
+  status = lv_status.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module.
+
+
+STEP 4 — Test in SE37 before pointing any capability at it
+------------------------------------------------------------------
+  1. First try calling BP_JOB_STATUS_GET directly via SE37's test
+     screen (F8), with a real JOBNAME/JOBCOUNT from a job already
+     scheduled via tool_sapRC_startAnalysis. If it returns a
+     STATUS value with no CALL_FUNCTION_NOT_REMOTE error, this wrapper
+     is unnecessary - point tool_sapRC_checkStatus at
+     BP_JOB_STATUS_GET directly and skip creating ZFM_CHECK_JOB_STATUS.
+  2. If step 1 fails with CALL_FUNCTION_NOT_REMOTE, create
+     ZFM_CHECK_JOB_STATUS as above and re-test with the same JOBNAME/
+     JOBCOUNT - confirm the returned STATUS matches SM37's display for
+     that job.
+  3. Only then point the RFC user in config_sap_systems.json's `rfc`
+     block at a system where this has been verified.

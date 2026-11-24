@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.data/
+.keys/
+.env
+node_modules/
+dist/
+sage_api/vendor/nwrfcsdk/*
+!sage_api/vendor/nwrfcsdk/.gitkeep
+_references/

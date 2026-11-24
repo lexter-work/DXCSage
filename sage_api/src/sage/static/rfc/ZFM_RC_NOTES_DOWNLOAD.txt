@@ -1,0 +1,179 @@
+ZFM_RC_NOTES_DOWNLOAD - custom RFC wrapper that schedules the SNOTE download job for a list of SAP Notes
+=========================================================================================================
+
+WHY THIS EXISTS
+---------------
+Before a readiness check runs, domain.check_prerequisite_notes() verifies the
+prerequisite SAP Notes (specifics/sap_readiness_check/configs/prerequisite_notes.json) exist in the
+system. Any note missing from CWBNTHEAD is downloaded by calling this function
+module, then the check waits for the note to appear.
+
+SCWN_NOTES_DOWNLOAD (what SNOTE's dialog uses) cannot be called over RFC: it
+uses SAPGUI_PROGRESS_INDICATOR, popups and log displays. The supported
+non-dialog entry point is CL_SCWN_DARK_API=>SCHEDULE_DOWNLOAD, which schedules
+the standard background job (R_SCWN_DARK_NOTES_DOWNLOAD). This FM wraps it.
+
+It only DOWNLOADS notes. Implementing a note stays a manual SNOTE step.
+
+Derived by reading TS3's source (CL_SCWN_DARK_API, SCWN_DARK_S_SCHDL_BGJOB_INFO,
+SCWN_DARK_S_SCHEDULE_INFO, IF_SCWN_DARK_CONSTANTS). NOT yet run: the first RFC
+call must be followed by an SM37 check that job NOTES_NTDWLD_<run id> was
+released (no COMMIT WORK is issued - the standard UI path does not either).
+
+SETUP (SE80/SE37, local object $TMP)
+------------------------------------
+1. Function group: reuse ZFG_MCPARCHPH (create it if no other capability's RFC
+   setup has yet). Never a per-capability group.
+2. Add the local class LCL_RC_NOTES_DOWNLOAD (STEP 1) to the function group's include
+   LZFG_MCPARCHPHRCC (create that include and add its INCLUDE statement to the main
+   program, next to LZFG_MCPARCHPHRRC, if it does not exist yet), then activate it.
+   It is a local class, so no global class and no class text elements: the messages are
+   plain literals in the code.
+3. Create function module ZFM_RC_NOTES_DOWNLOAD in ZFG_MCPARCHPH, processing
+   type "Remote-Enabled Module" (Attributes tab), and define the interface in
+   the editor (STEP 2 table). Paste only the body of STEP 2.
+   An earlier single-FM version failed the TS3 syntax check with fragments of
+   the FM name ("OTE_DOW", "FO"). Keeping the FM to a few lines and the logic
+   in a class is the workaround; not confirmed as the cause.
+4. Check S_BTCH_JOB's fields in SU21: the code checks JOBACTION = 'RELE',
+   JOBGROUP = '*'. Existence of the object is confirmed, the fields are not.
+5. SNOTE download must already work for dialog users on the system (download
+   service / technical user configured), or the background job fails.
+
+STEP 1 - local class
+--------------------
+CLASS lcl_rc_notes_download DEFINITION
+  FINAL
+  CREATE PRIVATE.
+
+  PUBLIC SECTION.
+    TYPES: BEGIN OF schedule_result,
+             schedule_id TYPE cwbschld,
+             run_id      TYPE cwbrun_id,
+             job_count   TYPE btcjobcnt,
+             return      TYPE bapiret2_t,
+           END OF schedule_result.
+
+    CLASS-METHODS new
+      RETURNING VALUE(result) TYPE REF TO lcl_rc_notes_download.
+
+    METHODS schedule_download
+      IMPORTING notes         TYPE cwb_t_note
+                description   TYPE text80
+      RETURNING VALUE(result) TYPE schedule_result.
+
+  PRIVATE SECTION.
+    METHODS is_authorized
+      RETURNING VALUE(result) TYPE abap_bool.
+
+    METHODS clean_notes
+      IMPORTING notes         TYPE cwb_t_note
+      RETURNING VALUE(result) TYPE cwb_t_note.
+
+    METHODS error_message
+      IMPORTING text          TYPE csequence
+      RETURNING VALUE(result) TYPE bapiret2.
+ENDCLASS.
+
+
+CLASS lcl_rc_notes_download IMPLEMENTATION.
+
+  METHOD new.
+    result = NEW #( ).
+  ENDMETHOD.
+
+
+  METHOD schedule_download.
+    IF is_authorized( ) = abap_false.
+      INSERT error_message( `No authorization to schedule the SAP Note download job` ) INTO TABLE result-return.
+      RETURN.
+    ENDIF.
+
+    DATA(clean_note_list) = clean_notes( notes ).
+    IF clean_note_list IS INITIAL.
+      INSERT error_message( `No SAP Note number supplied` ) INTO TABLE result-return.
+      RETURN.
+    ENDIF.
+
+    DATA(bgjob_info) = VALUE scwn_dark_s_schdl_bgjob_info(
+      descr        = COND #( WHEN description IS INITIAL THEN `RFC SAP Note download` ELSE description )
+      schdl_option = if_scwn_dark_constants=>ac_schdl_opt_i ).
+
+    TRY.
+        cl_scwn_dark_api=>schedule_download(
+          EXPORTING
+            is_schedule_bgjob_info = bgjob_info
+            it_notes               = clean_note_list
+          IMPORTING
+            es_schedule_info       = DATA(schedule_info) ).
+
+      CATCH cx_scwn_dark INTO DATA(dark_error).
+        INSERT error_message( dark_error->get_text( ) ) INTO TABLE result-return.
+        RETURN.
+
+      CATCH cx_root INTO DATA(unexpected_error).
+        INSERT error_message( |Unexpected error while scheduling the download: { unexpected_error->get_text( ) }| )
+          INTO TABLE result-return.
+        RETURN.
+    ENDTRY.
+
+    result-schedule_id = schedule_info-schedule_id.
+    result-run_id      = schedule_info-run_id.
+    result-job_count   = schedule_info-job_count.
+
+    INSERT VALUE #( type    = 'S'
+                    message = |Download job scheduled, schedule { schedule_info-schedule_id }, run { schedule_info-run_id }| )
+           INTO TABLE result-return.
+  ENDMETHOD.
+
+
+  METHOD is_authorized.
+    AUTHORITY-CHECK OBJECT 'S_BTCH_JOB'
+      ID 'JOBACTION' FIELD 'RELE'
+      ID 'JOBGROUP'  FIELD '*'.
+    result = xsdbool( sy-subrc = 0 ).
+  ENDMETHOD.
+
+
+  METHOD clean_notes.
+    result = notes.
+    SORT result.
+    DELETE ADJACENT DUPLICATES FROM result.
+    DELETE result WHERE table_line IS INITIAL.
+  ENDMETHOD.
+
+
+  METHOD error_message.
+    result = VALUE #( type = 'E' message = text ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+STEP 2 - function module
+------------------------
+Interface (define in the FM editor, all pass by value):
+
+  Importing  IT_NOTES        TYPE CWB_T_NOTE
+  Importing  IV_DESCRIPTION  TYPE TEXT80, optional
+  Exporting  EV_SCHEDULE_ID  TYPE CWBSCHLD
+  Exporting  EV_RUN_ID       TYPE CWBRUN_ID
+  Exporting  EV_JOB_COUNT    TYPE BTCJOBCNT
+  Exporting  ET_RETURN       TYPE BAPIRET2_T
+
+Body:
+
+  DATA(result) = lcl_rc_notes_download=>new( )->schedule_download(
+    notes       = it_notes
+    description = iv_description ).
+
+  ev_schedule_id = result-schedule_id.
+  ev_run_id      = result-run_id.
+  ev_job_count   = result-job_count.
+  et_return      = result-return.
+
+PYTHON SIDE
+-----------
+domain.py calls it with IT_NOTES = ["<10 digit note>", ...] (CWB_T_NOTE is a
+table of the bare data element CWBNTNUMM, so rows are plain values; falls back to {"": note}).
+A BAPIRET2 row with TYPE 'E' in
+ET_RETURN is treated as a failed schedule.
