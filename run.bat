@@ -145,19 +145,29 @@ exit /b 0
 
 :ensure_pyrfc
 if "%SAPNWRFC_HOME%"=="" exit /b 0
-if "%PYRFC_SRC%"=="" set "PYRFC_SRC=%~dp0sage_api\vendor\pyrfc"
-if not exist "%PYRFC_SRC%" (
-  where git >nul 2>&1 || ( echo PYRFC_SRC not found and git is not installed; cannot fetch pyrfc source. & exit /b 0 )
-  echo %PYRFC_SRC% not found. Cloning SAP/PyRFC there...
-  git clone https://github.com/SAP/PyRFC "%PYRFC_SRC%"
-)
+set "PYRFC_DEFAULT=%~dp0sage_api\vendor\pyrfc"
+if "%PYRFC_SRC%"=="" set "PYRFC_SRC=%PYRFC_DEFAULT%"
+if not exist "%PYRFC_SRC%" call :clone_pyrfc
 pushd "%~dp0sage_api"
 uv run python -c "import pyrfc; assert hasattr(pyrfc,'Connection')" >nul 2>&1
 if not errorlevel 1 ( popd & exit /b 0 )
 echo pyrfc is not installed. Building it from %PYRFC_SRC% ...
 set "PYRFC_BUILD_CYTHON=1"
 uv pip install --no-build-isolation "%PYRFC_SRC%"
+if not errorlevel 1 ( popd & exit /b 0 )
+if /i "%PYRFC_SRC%"=="%PYRFC_DEFAULT%" ( popd & exit /b 0 )
+echo Build from %PYRFC_SRC% failed; retrying with a fresh clone into %PYRFC_DEFAULT% ...
+set "PYRFC_SRC=%PYRFC_DEFAULT%"
+rd /s /q "%PYRFC_SRC%" >nul 2>&1
+call :clone_pyrfc
+uv pip install --no-build-isolation "%PYRFC_SRC%"
 popd
+exit /b 0
+
+:clone_pyrfc
+where git >nul 2>&1 || ( echo %PYRFC_SRC% not found and git is not installed; cannot fetch pyrfc source. & exit /b 1 )
+echo %PYRFC_SRC% not found. Cloning SAP/PyRFC there...
+git clone https://github.com/SAP/PyRFC "%PYRFC_SRC%"
 exit /b 0
 
 :start_api
