@@ -61,7 +61,10 @@ class OpenAIProvider(Provider):
             yield use
         yield Done(usage.prompt_tokens if usage else 0, usage.completion_tokens if usage else 0)
 
+    EXCLUDE = ("audio", "realtime", "transcribe", "tts", "image", "search-api", "codex", "live", "whisper", "healthcare")
+
     async def list_models(self, api_key: str) -> list[str]:
         client = AsyncOpenAI(api_key=api_key)
         page = await client.models.list()
-        return sorted(m.id for m in page.data if m.id.startswith("gpt"))
+        return sorted(m.id for m in page.data
+                      if m.id.startswith("gpt") and not any(x in m.id for x in self.EXCLUDE))
