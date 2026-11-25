@@ -25,10 +25,10 @@ SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided 
 
 
 class AgentService:
-    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, schedules=None, uploads=None, clock=utcnow, poll_seconds=5):
+    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, schedules=None, uploads=None, policies=None, clock=utcnow, poll_seconds=5):
         self._db, self._audit, self._settings, self._providers = db, audit, settings, providers
         self._workflows, self._setup, self._rfc, self._data_dir, self._usage = workflows, setup, rfc, data_dir, usage
-        self._clock, self._poll, self._ssh, self._email, self._schedules, self._uploads = clock, poll_seconds, ssh, email, schedules, uploads
+        self._clock, self._poll, self._ssh, self._email, self._schedules, self._uploads, self._policies = clock, poll_seconds, ssh, email, schedules, uploads, policies
         self._tasks: dict[int, asyncio.Task] = {}
         self._scheduler: asyncio.Task | None = None
 
@@ -161,11 +161,11 @@ class AgentService:
         for name, cls in self._workflows.items():
             if name in disabled:
                 continue
-            systems = await self._setup.enabled_systems(name)
-            if not systems:
-                continue
             schema = cls.Input.model_json_schema()
-            if "system_name" in schema.get("properties", {}):
+            if "system_name" in schema.get("properties", {}):             # a workflow without a system input (recording a policy review) needs no setup
+                systems = await self._setup.enabled_systems(name)
+                if not systems:
+                    continue
                 schema["properties"]["system_name"]["enum"] = [s["label"] for s in systems]
             specs.append(ToolSpec(name=name, description=cls.description, schema=schema))
         return specs
@@ -286,7 +286,7 @@ class AgentService:
             max_wait = int(await self._settings.get("wait.max_wait"))
             task_ctx = TaskContext(system["id"] if system else None, self._rfc, self._settings, binding, self._data_dir,
                                    system["label"] if system else "", self._ssh, sid=system["sid"] if system else "", workflows=self._workflows,
-                                   uploads=self._uploads, user_id=user["id"])
+                                   uploads=self._uploads, user_id=user["id"], actor=actor, policies=self._policies)
 
             async def cancelled():
                 return bool((await self._run(run_id))["cancel_requested"])

@@ -14,6 +14,7 @@ from sage.sap.ssh import SapSsh, asyncssh_connector, asyncssh_host_key
 from sage.runtime.agent import AgentService
 from sage.secretbox import SecretBox
 from sage.systems import SystemsService
+from sage.policies import PolicyService
 from sage.schedules import ScheduleService
 from sage.settings_store import SettingsStore
 from sage.uploads import UploadService
@@ -51,8 +52,9 @@ async def build_services(*, data_dir, key_dir, connector=None, providers=None, w
     email = EmailService(db, settings, audit, wf, clock, mail_sender or smtp_send)
     schedules = ScheduleService(db, audit, wf, systems, clock)
     uploads = UploadService(db, audit, data_dir, clock)
+    policies = PolicyService(db, audit, clock)
     agent = AgentService(db=db, audit=audit, settings=settings, providers=providers or default_providers(), workflows=wf,
-                         setup=setup, rfc=rfc, data_dir=data_dir, usage=usage, ssh=ssh, email=email, schedules=schedules, uploads=uploads, clock=clock)
-    return SimpleNamespace(usage=usage, agent=agent, manual_drive=os.getenv("SAGE_TEST_MANUAL_DRIVE") == "1", db=db, box=box, audit=audit, settings=settings, auth=auth, rfc=rfc, ssh=ssh, email=email, schedules=schedules, uploads=uploads, systems=systems,
+                         setup=setup, rfc=rfc, data_dir=data_dir, usage=usage, ssh=ssh, email=email, schedules=schedules, uploads=uploads, policies=policies, clock=clock)
+    return SimpleNamespace(usage=usage, agent=agent, manual_drive=os.getenv("SAGE_TEST_MANUAL_DRIVE") == "1", db=db, box=box, audit=audit, settings=settings, auth=auth, rfc=rfc, ssh=ssh, email=email, schedules=schedules, uploads=uploads, policies=policies, systems=systems,
                            data_dir=data_dir, clock=clock, connector=connector,
                            providers=providers, workflows=wf, health=health, setup=setup)

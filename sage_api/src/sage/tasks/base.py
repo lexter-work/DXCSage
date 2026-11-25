@@ -21,6 +21,8 @@ class TaskContext:
     sid: str = ""
     uploads: Any = None        # UploadService, for tasks that read a file the user attached
     user_id: int | None = None
+    actor: str = ""
+    policies: Any = None       # PolicyService
     workflows: Any = None      # {name: Workflow class}; set for real runs so a workflow can inspect the installed ones
 
 

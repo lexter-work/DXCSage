@@ -8,7 +8,7 @@ from sage.sap.request_input import request_changes
 from sage.sap.userrole_review import Change, Review, review
 from sage.tasks.su01_user_roles import ChangeIn, ChangeUserRoles, Outcome
 from sage.util import utcnow
-from sage.workflows.sap_user_role_review import TABLES, ReviewInput
+from sage.workflows.sap_user_role_review import TABLES, ReviewInput, policy_args
 from sage.workflows.base import Workflow
 from sage.sap.requirements import TableReadable
 
@@ -41,7 +41,7 @@ class SapUserRoleChange(Workflow):
         except ValueError as e:
             raise WorkflowFailed(str(e)) from e
         raw, errs = await request_changes(ctx, data.changes, data.file_id, ["user_roles"], lambda r: Change(**r))
-        rv = await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs)
+        rv = await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs, await policy_args(ctx, raw, data.policy_name))
         if not rv.ready:
             return ChangeOutput(executed=False, review=rv, results=[], message="Nothing was changed: " + " ".join(rv.errors))
         if not rv.changes:

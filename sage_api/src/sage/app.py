@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from sage.routes import admin_routes, auth_routes, chat_routes, email_routes, schedule_routes, systems_routes, users, workflow_routes
+from sage.routes import admin_routes, auth_routes, chat_routes, email_routes, policy_routes, schedule_routes, systems_routes, users, workflow_routes
 from sage.services import build_services
 
 
@@ -32,6 +32,6 @@ def create_app(*, data_dir=None, key_dir=None, connector=None, providers=None,
     async def health() -> dict:
         return {"status": "ok"}
 
-    for r in (auth_routes.router, users.router, systems_routes.router, workflow_routes.router, chat_routes.router, admin_routes.router, email_routes.router, schedule_routes.router):
+    for r in (auth_routes.router, users.router, systems_routes.router, workflow_routes.router, chat_routes.router, admin_routes.router, email_routes.router, schedule_routes.router, policy_routes.router):
         app.include_router(r)
     return app

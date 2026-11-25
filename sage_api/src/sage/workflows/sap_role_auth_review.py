@@ -3,7 +3,8 @@ does the change meet the policy (setting rolechange.policy), and would it add a 
 from sage.runtime.errors import WorkflowFailed
 from sage.sap.requirements import TableReadable
 from sage.sap.request_input import request_changes
-from sage.sap.roleauth_review import Review, RoleChange, review
+from sage.policies import request_hash
+from sage.sap.roleauth_review import Review, RoleChange, clean, review
 from sage.sap.sod import normalize_rules
 from sage.workflows.base import SystemInput, Workflow
 
@@ -13,6 +14,7 @@ TABLES = ("AGR_DEFINE", "AGR_AGRS", "AGR_1251", "AGR_TCODES")
 class ReviewInput(SystemInput):
     changes: list[RoleChange] = []
     file_id: str | None = None
+    policy_name: str | None = None      # one more policy to check; policies marked required are always checked
 
 
 async def load(ctx):
@@ -23,6 +25,15 @@ async def load(ctx):
         return cfg["policy"], normalize_rules(cfg["matrix"])
     except ValueError as e:
         raise WorkflowFailed(str(e)) from e
+
+
+async def policy_args(ctx, raw, policy, extra: str | None) -> list[dict]:
+    """What the AI recorded for each policy and this exact request (None = it still has to review)."""
+    if ctx.task_ctx.policies is None:
+        return []
+    cleaned, _ = clean(raw, int(policy.get("max_changes_per_request", 50)) + 10 ** 6)
+    h = request_hash("role_auth", [c.model_dump() for c in cleaned])
+    return await ctx.snapshot("policies", lambda: ctx.task_ctx.policies.status_for([extra or ""], "role_auth", h))
 
 
 class SapRoleAuthReview(Workflow):
@@ -39,4 +50,4 @@ class SapRoleAuthReview(Workflow):
     async def run(self, ctx, data: ReviewInput) -> Review:
         policy, rules = await load(ctx)
         raw, errs = await request_changes(ctx, data.changes, data.file_id, ["role_auth", "tcode_removal"], lambda r: RoleChange(**r))
-        return await review(ctx, raw, policy, rules, errs)
+        return await review(ctx, raw, policy, rules, errs, await policy_args(ctx, raw, policy, data.policy_name))

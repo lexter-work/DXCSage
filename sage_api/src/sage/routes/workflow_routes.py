@@ -48,7 +48,7 @@ async def list_workflows(request: Request, user: dict = Depends(current_user)):
     out = []
     for name, cls in svc.workflows.items():
         item = {"name": name, "description": cls.description, "durable": cls.durable, "enabled": name not in disabled,
-                "settings": [s.model_dump() for s in cls.binding_settings], "bindings": [], "schedulable": cls.schedulable,
+                "settings": [s.model_dump() for s in cls.binding_settings], "bindings": [], "schedulable": cls.schedulable, "needs_system": "system_name" in cls.Input.model_fields,
                 "input_fields": _fields(cls)}
         if user["role"] == "admin":
             item["bindings"] = await svc.setup.bindings(name)

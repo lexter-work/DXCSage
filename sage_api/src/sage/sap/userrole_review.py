@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from sage.policies import PolicyStatus, policy_view
 from sage.sap.roles import Conflict, assigned_roles, existing_roles, existing_users, role_data, with_children
 from sage.sap.sod import SAFE, conflicts_for_roles
 
@@ -30,6 +31,8 @@ class Review(BaseModel):
     changes: list[Change]                    # cleaned: upper case, duplicates removed, no-ops dropped
     users: list[UserReview]
     unverified_roles: list[str]
+    policies: list[PolicyStatus] = []
+    next_step: str = ""
 
 
 def clean(raw: list[Change], max_entries: int) -> tuple[list[Change], list[str]]:
@@ -53,7 +56,7 @@ def clean(raw: list[Change], max_entries: int) -> tuple[list[Change], list[str]]
     return out, errors
 
 
-async def review(ctx, raw: list[Change], rules: list[dict], day: str, max_entries: int, pre_errors: list[str] | None = None) -> Review:
+async def review(ctx, raw: list[Change], rules: list[dict], day: str, max_entries: int, pre_errors: list[str] | None = None, policies: list[dict] | None = None) -> Review:
     if pre_errors:
         return Review(ready=False, errors=pre_errors, warnings=[], changes=[], users=[], unverified_roles=[])
     changes, errors = clean(raw, max_entries)
@@ -103,4 +106,6 @@ async def review(ctx, raw: list[Change], rules: list[dict], day: str, max_entrie
         for c in r.conflicts_after:
             if c.rule_id in r.introduced and c.severity == "CRITICAL":
                 errors.append(f"{r.username}: the change would add the CRITICAL conflict {c.rule_id} ({c.conflicting_objects}).")
-    return Review(ready=not errors, errors=errors, warnings=warnings, changes=real, users=rows, unverified_roles=unverified)
+    pol, pol_errors, step = policy_view(policies or [])
+    errors += pol_errors
+    return Review(ready=not errors, errors=errors, warnings=warnings, changes=real, users=rows, unverified_roles=unverified, policies=pol, next_step=step)

@@ -289,7 +289,7 @@ Added for SUM monitoring, whose state lives in files on the host, not in RFC-rea
 - **Sending:** `AgentService` calls `EmailService.notify` at each transition of a workflow call. It queues a task, never raises and never blocks the run. `email_log` has a unique (tool call, event) pair, so a replay after a restart does not send twice. Recipients are a blind copy, and the To header is the from address.
 - **Content:** workflow, system, requester, state, run, time, and the error text of a failure. Never the output of a workflow, because groups may include people outside Sage.
 - **Result states:** a `result:<STATE>` email is sent only when the state differs from the previous successful call of the same workflow, system and input, so recurring runs do not repeat it.
-- **Not included:** digest mail and hourly reminders while a state lasts.
+- **Not included:** per-person unsubscribe.
 
 ## Schedules (recurring runs)
 - **Table `schedules`:** name, workflow, input (JSON, validated against the workflow's Input), kind `interval` (5 to 10080 minutes) or `daily` (HH:MM UTC), enabled, next/last run, creator, and a hidden chat (provider `schedule`) that owns its runs. The chat list hides those chats.
@@ -297,3 +297,17 @@ Added for SUM monitoring, whose state lives in files on the host, not in RFC-rea
 - **Execution:** the scheduler tick of `AgentService` starts a run (`provider = schedule`, no model, no tokens) for each due schedule, and `_drive_scheduled` runs the workflow through `_execute`, the same path as a chat run. So authorization, health check freshness, audit, steps, durable waiting, restart recovery and email rules all apply. The actor is `schedule:<name>`.
 - **Overlap and downtime:** a due schedule whose previous run is still running or waiting is skipped. After downtime a missed schedule runs once. "Run now" starts one run and leaves the timetable alone.
 - **Usage:** scheduled runs are not counted as user requests.
+
+## Excel requests and chat-filled requests
+- The four change workflows take `changes` (a list the model fills from the chat) or `file_id` (an upload), not both. `uploads` rows tie a file to a user and a chat; `UploadService.read` returns it only to that user. Files are .xlsx up to 5 MB, stored under the data directory.
+- `excel_requests.py` builds three templates (sheets Request, Examples, Instructions) and parses by header row: `user_roles`, `role_auth`, `tcode_removal`. Row errors are reported per row and block the review. The upload is read by the task `excel.read_request`, so a replay reads the same rows.
+- The chat shows attachments, and `create_run` adds `[Attached file: name, file_id=..., N row(s)]` to the user message so the model can pass the id.
+
+## Policy review by the model
+- Tables `policies` (name, text, fingerprint, required) and `policy_reviews` (policy, fingerprint, kind, request hash, findings; unique, so the first verdict stands). Admin page and API under `/api/policies`.
+- The review workflows build `policies` for the exact request (hash of the cleaned changes). A policy without a verdict is `pending` and carries its text and a next step for the model; a verdict with findings adds errors. Both block the change workflows, which run the same review.
+- `sap_record_policy_review` (no system input, so it is offered without setup) records a verdict; a stale fingerprint is refused.
+
+## Reminders and digests
+- A result state that lasts is mailed again every `email.reminder_minutes` if the workflow lists it in `reminder_states`. The "same question" is workflow, system and input (`call_key`); the last mail time comes from `email_log.key`.
+- A rule has a mode: `instant`, `hourly` or `daily`. Digest events wait in `email_digest` and one email per group and mode is sent by the scheduler tick; a failed digest keeps its events. `db.MIGRATIONS` adds columns to databases that predate them.

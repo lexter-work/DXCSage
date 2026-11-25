@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from sage.policies import PolicyStatus, policy_view
 from sage.sap.roles import Conflict, any_of, role_data
 from sage.sap.sod import SAFE, conflicts_for_roles
 from sage.tasks.sap_read_table import ReadTable, ReadTableIn
@@ -44,6 +45,8 @@ class Review(BaseModel):
     changes: list[RoleChange]
     roles: list[RoleReview]
     unverified_roles: list[str]
+    policies: list[PolicyStatus] = []
+    next_step: str = ""
 
 
 def clean(raw: list[RoleChange], max_entries: int) -> tuple[list[RoleChange], list[str]]:
@@ -94,7 +97,7 @@ async def _rows(ctx, table, fields, where):
     return await ctx.task(ReadTable, ReadTableIn(table=table, fields=fields, where=where))
 
 
-async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict], pre_errors: list[str] | None = None) -> Review:
+async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict], pre_errors: list[str] | None = None, policies: list[dict] | None = None) -> Review:
     if pre_errors:
         return Review(ready=False, errors=pre_errors, warnings=[], violations=[], changes=[], roles=[], unverified_roles=[])
     changes, errors = clean(raw, int(policy.get("max_changes_per_request", 50)))
@@ -176,4 +179,6 @@ async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict], pr
         warnings.append(f"The authorizations of {', '.join(unverified)} could not be read completely, so a conflict there may be missing.")
     if viols:
         errors.append(f"{len(viols)} policy violation(s). Such changes need an exception from the security team and are done in PFCG.")
-    return Review(ready=not errors, errors=errors, warnings=warnings, violations=viols, changes=changes, roles=reviews, unverified_roles=unverified)
+    pol, pol_errors, step = policy_view(policies or [])
+    errors += pol_errors
+    return Review(ready=not errors, errors=errors, warnings=warnings, violations=viols, changes=changes, roles=reviews, unverified_roles=unverified, policies=pol, next_step=step)

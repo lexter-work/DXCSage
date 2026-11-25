@@ -6,7 +6,8 @@ from sage.runtime.errors import WorkflowFailed
 from sage.sap.requirements import TableReadable
 from sage.sap.sod import normalize_rules
 from sage.sap.request_input import request_changes
-from sage.sap.userrole_review import Change, Review, review
+from sage.policies import request_hash
+from sage.sap.userrole_review import Change, Review, clean, review
 from sage.util import utcnow
 from sage.workflows.base import SystemInput, Workflow
 
@@ -16,6 +17,16 @@ TABLES = ("USR02", "AGR_USERS", "AGR_DEFINE", "AGR_AGRS", "AGR_1251")
 class ReviewInput(SystemInput):
     changes: list[Change] = []
     file_id: str | None = None
+    policy_name: str | None = None      # one more policy to check; policies marked required are always checked
+
+
+async def policy_args(ctx, raw, extra: str | None) -> list[dict]:
+    """What the AI recorded for each policy and this exact request (None = it still has to review)."""
+    if ctx.task_ctx.policies is None:
+        return []
+    cleaned, _ = clean(raw, 10 ** 6)
+    h = request_hash("user_role", [c.model_dump() for c in cleaned])
+    return await ctx.snapshot("policies", lambda: ctx.task_ctx.policies.status_for([extra or ""], "user_role", h))
 
 
 class SapUserRoleReview(Workflow):
@@ -38,4 +49,4 @@ class SapUserRoleReview(Workflow):
         except ValueError as e:
             raise WorkflowFailed(str(e)) from e
         raw, errs = await request_changes(ctx, data.changes, data.file_id, ["user_roles"], lambda r: Change(**r))
-        return await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs)
+        return await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs, await policy_args(ctx, raw, data.policy_name))

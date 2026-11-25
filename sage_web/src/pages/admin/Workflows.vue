@@ -45,7 +45,8 @@ onMounted(load)
         <div class="rowx"><button class="btn sm" :class="{ primary: !w.enabled }" @click="setState(w)">{{ w.enabled ? 'Disable workflow' : 'Enable workflow' }}</button>
           <button class="btn sm ghost" @click="openNotif(w)">Email notifications</button></div>
       </div>
-      <div>
+      <div v-if="!w.needs_system"><div class="panel"><div class="muted" style="padding:18px">This workflow needs no system and no setup. It is available to the model once it is enabled.</div></div></div>
+      <div v-else>
         <div v-if="w.bindings.length" class="panel tablewrap"><table>
           <thead><tr><th>System</th><th>Setup</th><th>Last health check</th><th /></tr></thead>
           <tbody>
