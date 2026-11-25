@@ -5,11 +5,13 @@ import Icon from './Icon.vue'
 const props = defineProps<{ open: boolean; title: string; mono?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const panel = ref<HTMLElement | null>(null)
+const wide = ref(false)
 let opener: HTMLElement | null = null
 
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
 watch(() => props.open, async (o) => {
   if (o) {
+    wide.value = false
     opener = document.activeElement as HTMLElement | null
     window.addEventListener('keydown', onKey)
     await nextTick()
@@ -25,10 +27,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 <template>
   <Teleport to="body">
     <div v-if="open" class="scrim on" @click.self="emit('close')">
-      <div ref="panel" class="drawer" role="dialog" aria-modal="true" :aria-label="title">
+      <div ref="panel" class="drawer" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="title">
         <header>
           <h2 :class="{ mono }">{{ title }}</h2>
           <slot name="status" />
+          <button class="btn ghost sm" :aria-label="wide ? 'Shrink' : 'Expand'" @click="wide = !wide"><Icon :name="wide ? 'collapse' : 'expand'" /></button>
           <button class="btn ghost sm" aria-label="Close" @click="emit('close')"><Icon name="close" /></button>
         </header>
         <div class="body"><slot /></div>
