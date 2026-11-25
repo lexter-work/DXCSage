@@ -145,6 +145,7 @@ onMounted(() => load().catch(toast))
       <div class="gside">
         <div v-if="guide.abap_objects.length" class="sidecard"><h3>Object names on this system</h3>
           <form class="in" @submit.prevent="saveNames">
+            <p class="help" style="margin:0"><router-link :to="{ path: '/admin/abap', query: { system: systemId } }">Process flow, code and how to create each object</router-link></p>
             <p class="help" style="margin:0">Each custom ABAP object has a fixed ID. If this system names it differently, enter that name. Sage calls and checks the system's name and keeps the ID. This applies to every workflow on this system.</p>
             <div v-for="o in guide.abap_objects" :key="o.object_id" class="lbl">
               <label :for="'an-' + o.object_id">{{ o.kind === 'function_group' ? 'Function group' : 'Function module' }} · ID <span class="mono">{{ o.object_id }}</span></label>

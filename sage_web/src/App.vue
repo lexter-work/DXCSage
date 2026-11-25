@@ -17,7 +17,7 @@ async function logout() { await post('api/auth/logout'); session.user = null; ro
 
 const work = [['/chat', 'Chat', 'chat'], ['/usage', 'My usage', 'usage']]
 const admin = [
-  ['/admin/systems', 'Systems', 'systems'], ['/admin/workflows', 'Workflows', 'workflows'], ['/admin/health', 'Health', 'health'],
+  ['/admin/systems', 'Systems', 'systems'], ['/admin/workflows', 'Workflows', 'workflows'], ['/admin/abap', 'ABAP objects', 'workflows'], ['/admin/health', 'Health', 'health'],
   ['/admin/runs', 'Runs', 'runs'], ['/admin/usage', 'Usage (all)', 'usage'], ['/admin/audit', 'Audit', 'audit'],
   ['/admin/users', 'Users', 'users'], ['/admin/settings', 'Settings', 'settings'],
 ]

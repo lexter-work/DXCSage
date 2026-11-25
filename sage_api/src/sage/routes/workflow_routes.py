@@ -3,6 +3,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from sage.deps import admin_user, current_user
+from sage.abap_docs import catalog_list, object_doc
 from sage.guide import build_guide, guide_markdown
 from sage.sap.rfc import RfcError
 from sage.tasks.base import TaskContext
@@ -129,3 +130,22 @@ async def recheck(body: Recheck, request: Request, admin: dict = Depends(admin_u
             if body.system_id in (None, b["system_id"]):
                 await svc.health.check(b["system_id"], name, admin["username"])
     return {"ok": True}
+
+
+async def _names(svc, system_id):
+    return await svc.systems.abap_names(system_id) if system_id else {}
+
+
+@router.get("/abap-objects")
+async def abap_objects(request: Request, system_id: int | None = None, admin: dict = Depends(admin_user)):
+    svc = _svc(request)
+    return catalog_list(svc.workflows, await _names(svc, system_id))
+
+
+@router.get("/abap-objects/{object_id}")
+async def abap_object(object_id: str, request: Request, system_id: int | None = None, admin: dict = Depends(admin_user)):
+    svc = _svc(request)
+    doc = object_doc(object_id, svc.workflows, await _names(svc, system_id))
+    if doc is None:
+        raise HTTPException(404, "Unknown ABAP object")
+    return doc
