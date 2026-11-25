@@ -29,6 +29,8 @@ class Workflow(ABC):
     tasks: ClassVar[tuple[type[Task], ...]] = ()
     extra_requirements: ClassVar[tuple[Requirement, ...]] = ()
     binding_settings: ClassVar[tuple[SettingSpec, ...]] = ()
+    schedule_min_minutes: ClassVar[int] = 5            # shortest interval allowed on a schedule: longer for workflows that start SAP jobs
+    reminder_states: ClassVar[tuple[str, ...]] = ()    # result states that are mailed again, every email.reminder_minutes, while they last
     schedulable: ClassVar[bool] = False                # True only for read-only workflows that may run unattended on a schedule
     result_states: ClassVar[tuple[str, ...]] = ()      # states of the result an email rule may react to (see result_state)
 

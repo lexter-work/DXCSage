@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -21,6 +23,7 @@ class GroupIn(BaseModel):
 class Rule(BaseModel):
     group_id: int
     events: list[str]
+    mode: Literal["instant", "hourly", "daily"] = "instant"
 
 
 class Rules(BaseModel):

@@ -42,6 +42,7 @@ class SapSumStatus(Workflow):
     schedulable = True
     Input, Output = SystemInput, SumOutput
     tasks = (PollSum,)
+    reminder_states = ("ERROR", "POSSIBLE_HANG")
     result_states = ("RUNNING", "WAITING_INPUT", "ERROR", "POSSIBLE_HANG", "PROCESS_DEAD", "COMPLETED", "OFFLINE", "UNKNOWN")
 
     @classmethod

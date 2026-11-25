@@ -116,6 +116,18 @@ export const SETTINGS_HELP: Record<string, SettingHelp> = {
     fallback: 'Empty (email cannot be sent).',
     effect: 'The recipients are hidden from each other: every email is addressed to this address and the group members get a blind copy.',
   },
+  'email.reminder_minutes': {
+    summary: 'How often a lasting problem is mailed again.',
+    format: 'Minutes, as a whole number. 0 turns reminders off.',
+    fallback: '60',
+    effect: 'When a status workflow keeps finding the same bad result (for example SUM in ERROR), the first email goes out at once. While it lasts, a reminder goes out every this many minutes, to the groups tagged for that result. Only results a workflow lists for reminders repeat.',
+  },
+  'email.digest_hour_utc': {
+    summary: 'The hour of the day (UTC) when daily digests are sent.',
+    format: 'A whole number from 0 to 23.',
+    fallback: '8',
+    effect: 'A group tagged for a daily digest gets one email a day, from this hour on, with all events since the last one. Hourly digests ignore this setting.',
+  },
   'rolechange.max_entries': {
     summary: 'The most changes one role-change request may hold.',
     format: 'A whole number.',

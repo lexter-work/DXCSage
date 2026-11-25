@@ -21,15 +21,15 @@ async function openNotif(w: any) {
   try {
     const r = await get(`api/workflows/${w.name}/notifications`)
     allGroups.value = await get('api/email/groups')
-    const sel: Record<number, string[]> = {}
-    for (const x of r.rules) sel[x.group_id] = [...x.events]
+    const sel: Record<number, { events: string[]; mode: string }> = {}
+    for (const x of r.rules) sel[x.group_id] = { events: [...x.events], mode: x.mode }
     nf.value = { name: w.name, events: r.events, sel }
   } catch (e) { toast(e) }
 }
-function toggleGroup(gid: number) { const s = nf.value.sel; if (s[gid]) delete s[gid]; else s[gid] = ['completed', 'failed'] }
-function toggleEvent(gid: number, key: string) { const a: string[] = nf.value.sel[gid]; const i = a.indexOf(key); if (i < 0) a.push(key); else a.splice(i, 1) }
+function toggleGroup(gid: number) { const s = nf.value.sel; if (s[gid]) delete s[gid]; else s[gid] = { events: ['completed', 'failed'], mode: 'instant' } }
+function toggleEvent(gid: number, key: string) { const a: string[] = nf.value.sel[gid].events; const i = a.indexOf(key); if (i < 0) a.push(key); else a.splice(i, 1) }
 async function saveNotif() {
-  const rules = Object.entries(nf.value.sel as Record<string, string[]>).map(([g, events]) => ({ group_id: Number(g), events }))
+  const rules = Object.entries(nf.value.sel as Record<string, { events: string[]; mode: string }>).map(([g, v]) => ({ group_id: Number(g), events: v.events, mode: v.mode }))
   try { await put(`api/workflows/${nf.value.name}/notifications`, { rules }); toast('Email notifications saved'); nf.value = null } catch (e) { toast(e) }
 }
 onMounted(load)
@@ -73,7 +73,8 @@ onMounted(load)
           <div v-for="g in allGroups" :key="g.id" class="row">
             <label class="chk"><input type="checkbox" :checked="!!nf.sel[g.id]" @change="toggleGroup(g.id)"> <b>{{ g.name }}</b> <span class="help">{{ g.members }} {{ g.members === 1 ? 'person' : 'people' }}</span></label>
             <div v-if="nf.sel[g.id]" class="evs">
-              <label v-for="e in nf.events" :key="e.key" class="chk"><input type="checkbox" :checked="nf.sel[g.id].includes(e.key)" @change="toggleEvent(g.id, e.key)"> {{ e.label }}</label>
+              <label v-for="e in nf.events" :key="e.key" class="chk"><input type="checkbox" :checked="nf.sel[g.id].events.includes(e.key)" @change="toggleEvent(g.id, e.key)"> {{ e.label }}</label>
+              <label class="lbl" style="flex-basis:100%">Send<select v-model="nf.sel[g.id].mode" class="field"><option value="instant">Immediately</option><option value="hourly">As an hourly digest</option><option value="daily">As a daily digest</option></select></label>
             </div>
           </div>
         </div>

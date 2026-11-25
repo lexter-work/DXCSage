@@ -30,6 +30,7 @@ class SapObsoleteTcodes(Workflow):
                    "PROFGEN_CORR_REPORT_2, all roles). Runs as a background job that can take a long time. Returns the role and "
                    "transaction pairs SAP would delete, the first 100 inline and all of them in a CSV file. Read-only: it changes no role.")
     Input, Output, durable = SystemInput, ObsoleteOutput, True
+    schedulable, schedule_min_minutes = True, 1440     # starts a SAP job: at most once a day
     tasks = (StartScan, JobStatus, FetchResult)
     extra_requirements = (JOB_AUTH,)
 

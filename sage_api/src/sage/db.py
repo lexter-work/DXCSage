@@ -7,6 +7,9 @@ import aiosqlite
 
 from sage.schema import SCHEMA
 
+# (table, column, definition): added to databases created before the column existed
+MIGRATIONS = [("workflow_notifications", "mode", "TEXT NOT NULL DEFAULT 'instant'"), ("email_log", "key", "TEXT NOT NULL DEFAULT ''")]
+
 
 class _Ops:
     def __init__(self, conn):
@@ -39,6 +42,10 @@ class Database(_Ops):
         await self._c.execute("PRAGMA journal_mode=WAL")
         await self._c.execute("PRAGMA foreign_keys=ON")
         await self._c.executescript(SCHEMA)
+        for table, column, ddl in MIGRATIONS:
+            have = {r[1] for r in await (await self._c.execute(f"PRAGMA table_info({table})")).fetchall()}
+            if column not in have:
+                await self._c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
         await self._c.commit()
 
     async def close(self):

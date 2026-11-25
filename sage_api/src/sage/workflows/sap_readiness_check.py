@@ -47,6 +47,7 @@ class SapReadinessCheck(Workflow):
                    "(downloading missing ones), schedule RC_COLLECT_ANALYSIS_DATA, wait until the job finishes (can take hours), "
                    "and download the ZIP archive. Upload to SAP Readiness Check stays manual.")
     Input, Output, durable = ReadinessInput, ReadinessOutput, True
+    schedulable, schedule_min_minutes = True, 1440     # starts a SAP job: at most once a day
     tasks = (ReadTable, NotesDownload, StartAnalysis, JobStatus, FetchArchive)
     extra_requirements = (
         TableReadable("CWBNTHEAD", guide="Allow reading CWBNTHEAD (SAP Notes header) for the RFC user."),

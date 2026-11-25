@@ -10,7 +10,8 @@ from sage.providers.base import Done, TextDelta, ToolSpec, ToolUse
 from sage.runtime.context import WorkflowContext
 from sage.runtime.errors import RunCancelled, WorkflowFailed, WorkflowSuspended
 from sage.tasks.base import TaskContext
-from sage.util import iso, utcnow
+from sage.emailer import call_key
+from sage.util import iso, parse_iso, utcnow
 from sage.workflow_setup import AccessError
 
 log = logging.getLogger("sage.agent")
@@ -224,22 +225,38 @@ class AgentService:
                 results.append(await self._execute(run_id, user, use, existing))
         return results
 
-    async def _state_changed(self, cls, workflow, call_id, state) -> bool:
-        """A repeated result (a schedule that finds the same ERROR every time) is mailed once, when it first appears."""
-        me = await self._db.fetchone("SELECT system_id,input FROM tool_calls WHERE id=?", (call_id,))
+    async def _result_mail(self, cls, workflow, call_id, state):
+        """None = send nothing. Otherwise (key, reminder_since): a result that is new is mailed at once (since is empty); one that lasts
+        (a schedule that keeps finding the same ERROR) is mailed again as a reminder every email.reminder_minutes, for states the workflow lists."""
+        me = await self._db.fetchone("SELECT system_id,input,started_at FROM tool_calls WHERE id=?", (call_id,))
         want = json.loads(me["input"])
+        key = call_key(workflow, me["system_id"], want)
+        same, since = [], me["started_at"]                      # earlier calls of the same question, newest first, while they had this state
         for prev in await self._db.fetchall(
-                "SELECT input,output FROM tool_calls WHERE workflow=? AND system_id IS ? AND status='ok' AND id<? ORDER BY id DESC LIMIT 20", (workflow, me["system_id"], call_id)):
-            if json.loads(prev["input"]) == want:
-                try:
-                    return cls.result_state(cls.Output.model_validate_json(prev["output"])) != state
-                except Exception:  # noqa: BLE001
-                    return True
-        return True
+                "SELECT input,output,started_at FROM tool_calls WHERE workflow=? AND system_id IS ? AND status='ok' AND id<? ORDER BY id DESC LIMIT 60", (workflow, me["system_id"], call_id)):
+            if json.loads(prev["input"]) != want:
+                continue
+            try:
+                was = cls.result_state(cls.Output.model_validate_json(prev["output"]))
+            except Exception:  # noqa: BLE001
+                was = None
+            if was != state:
+                break
+            same.append(prev)
+            since = prev["started_at"]
+        if not same:
+            return key, ""
+        minutes = int(await self._settings.get("email.reminder_minutes"))
+        if state not in cls.reminder_states or minutes <= 0:
+            return None
+        last = await self._email.last_sent(key, f"result:{state}") if self._email else None
+        if last is None or (self._clock() - parse_iso(last)).total_seconds() >= minutes * 60:
+            return key, since
+        return None
 
-    def _mail(self, workflow, event, call_id, run_id, system, actor, detail=""):
+    def _mail(self, workflow, event, call_id, run_id, system, actor, detail="", key="", reminder_since=""):
         if self._email:
-            self._email.notify(workflow=workflow, event=event, tool_call_id=call_id, run_id=run_id, system=system, actor=actor, detail=detail)
+            self._email.notify(workflow=workflow, event=event, tool_call_id=call_id, run_id=run_id, system=system, actor=actor, detail=detail, key=key, reminder_since=reminder_since)
 
     async def _execute(self, run_id, user, use, existing):
         name, actor = use["name"], user["username"]
@@ -282,8 +299,8 @@ class AgentService:
                                   is_cancelled=cancelled, emit=emit)
             out = await cls().run(ctx, data)
             output = out.model_dump_json()
-            if (state := cls.result_state(out)) and await self._state_changed(cls, name, call_id, state):
-                self._mail(name, f"result:{state}", call_id, run_id, label, actor, getattr(out, "message", ""))
+            if (state := cls.result_state(out)) and (decision := await self._result_mail(cls, name, call_id, state)) is not None:
+                self._mail(name, f"result:{state}", call_id, run_id, label, actor, getattr(out, "message", ""), key=decision[0], reminder_since=decision[1])
         except WorkflowSuspended as s:
             self._mail(name, "waiting", call_id, run_id, label, actor)
             await self._db.execute("UPDATE tool_calls SET status='waiting' WHERE id=?", (call_id,))
@@ -328,6 +345,8 @@ class AgentService:
         now = iso(self._clock())
         for r in await self._db.fetchall("SELECT id FROM runs WHERE status='waiting' AND resume_at<=?", (now,)):
             self.launch(r["id"])
+        if self._email:
+            await self._email.flush_digests()
         if self._schedules:
             for s in await self._schedules.due():
                 await self.run_schedule(s)

@@ -99,7 +99,7 @@ async def test_rules_accept_only_events_the_workflow_has_and_vanish_with_the_gro
     assert "waiting" in {e["key"] for e in (await client.get("/api/workflows/slow_wf/notifications")).json()["events"]}
     assert "result:ERROR" in {e["key"] for e in (await client.get("/api/workflows/status_wf/notifications")).json()["events"]}
     rules = await tag(client, "quick_wf", gid, ["completed", "waiting", "bogus"])
-    assert rules["rules"] == [{"group_id": gid, "events": ["completed"]}]
+    assert rules["rules"] == [{"group_id": gid, "events": ["completed"], "mode": "instant"}]
     assert (await client.put("/api/workflows/quick_wf/notifications", json={"rules": [{"group_id": 99, "events": ["completed"]}]})).status_code == 400
     await client.delete(f"/api/email/groups/{gid}")
     assert (await client.get("/api/workflows/quick_wf/notifications")).json()["rules"] == []

@@ -72,11 +72,18 @@ CREATE TABLE IF NOT EXISTS email_group_members(
   email TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', UNIQUE(group_id, email));
 CREATE TABLE IF NOT EXISTS workflow_notifications(
   workflow TEXT NOT NULL, group_id INTEGER NOT NULL REFERENCES email_groups(id) ON DELETE CASCADE,
-  events TEXT NOT NULL, PRIMARY KEY(workflow, group_id));
+  events TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'instant', PRIMARY KEY(workflow, group_id));
+CREATE TABLE IF NOT EXISTS email_digest(
+  id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, mode TEXT NOT NULL, tool_call_id INTEGER NOT NULL, event TEXT NOT NULL, workflow TEXT NOT NULL,
+  system TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL DEFAULT '', run_id INTEGER NOT NULL, label TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  UNIQUE(group_id, mode, tool_call_id, event));
+CREATE TABLE IF NOT EXISTS email_digest_state(
+  group_id INTEGER NOT NULL, mode TEXT NOT NULL, last_sent_at TEXT NOT NULL, PRIMARY KEY(group_id, mode));
 CREATE TABLE IF NOT EXISTS email_log(
   id INTEGER PRIMARY KEY, tool_call_id INTEGER NOT NULL, run_id INTEGER NOT NULL, workflow TEXT NOT NULL, event TEXT NOT NULL,
-  groups TEXT NOT NULL, recipients INTEGER NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  groups TEXT NOT NULL, recipients INTEGER NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, key TEXT NOT NULL DEFAULT '',
   UNIQUE(tool_call_id, event));
+-- COLUMNS added after the first release are also listed in db.MIGRATIONS, for databases that already exist
 CREATE TABLE IF NOT EXISTS system_health(
   id INTEGER PRIMARY KEY, system_id INTEGER NOT NULL REFERENCES systems(id), workflow TEXT NOT NULL,
   req_kind TEXT NOT NULL, req_key TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL,

@@ -28,6 +28,8 @@ DEFAULTS: dict = {
     "email.smtp_user": "",
     "email.smtp_password": "",
     "email.from_address": "",
+    "email.reminder_minutes": 60,
+    "email.digest_hour_utc": 8,
     "rolechange.max_entries": 50,
     "rolechange.policy": {
         "max_changes_per_request": 50,

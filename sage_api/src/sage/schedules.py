@@ -63,8 +63,9 @@ class ScheduleService:
         except ValidationError as e:
             raise ScheduleError(f"Invalid input: {e.errors(include_url=False)}") from None
         if kind == "interval":
-            if not isinstance(interval_minutes, int) or not MIN_MINUTES <= interval_minutes <= MAX_MINUTES:
-                raise ScheduleError(f"The interval must be between {MIN_MINUTES} minutes and {MAX_MINUTES // 1440} days.")
+            low = max(MIN_MINUTES, cls.schedule_min_minutes)
+            if not isinstance(interval_minutes, int) or not low <= interval_minutes <= MAX_MINUTES:
+                raise ScheduleError(f"The interval must be between {low} minutes and {MAX_MINUTES // 1440} days for this workflow.")
         elif kind == "daily":
             if not TIME.match(at_time or ""):
                 raise ScheduleError("Give the time of day as HH:MM (UTC).")
