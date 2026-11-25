@@ -16,14 +16,18 @@ from sage.workflow_setup import AccessError
 log = logging.getLogger("sage.agent")
 
 SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided workflow tools when they fit. "
-                 "A workflow can run for hours; its result arrives when it finishes. Never invent results.")
+                 "A workflow can run for hours; its result arrives when it finishes. Never invent results. "
+                 "Requests to change user roles or role authorizations can come two ways. If the user attached an Excel file, its file_id is in the message: "
+                 "pass it as file_id. Otherwise take the changes from what the user wrote and fill the changes list yourself, without asking for an Excel file. "
+                 "Run the review workflow first and show its findings. Call a change workflow only after the user has confirmed the exact list. "
+                 "The user can download Excel templates from the Templates menu of the chat.")
 
 
 class AgentService:
-    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, schedules=None, clock=utcnow, poll_seconds=5):
+    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, schedules=None, uploads=None, clock=utcnow, poll_seconds=5):
         self._db, self._audit, self._settings, self._providers = db, audit, settings, providers
         self._workflows, self._setup, self._rfc, self._data_dir, self._usage = workflows, setup, rfc, data_dir, usage
-        self._clock, self._poll, self._ssh, self._email, self._schedules = clock, poll_seconds, ssh, email, schedules
+        self._clock, self._poll, self._ssh, self._email, self._schedules, self._uploads = clock, poll_seconds, ssh, email, schedules, uploads
         self._tasks: dict[int, asyncio.Task] = {}
         self._scheduler: asyncio.Task | None = None
 
@@ -35,12 +39,18 @@ class AgentService:
         await self._db.execute("INSERT INTO run_events(run_id,type,data,created_at) VALUES(?,?,?,?)",
                                (run_id, type_, json.dumps(data or {}, default=str), iso(self._clock())))
 
-    async def create_run(self, chat_id, user, text) -> int:
+    async def create_run(self, chat_id, user, text, files=()) -> int:
         chat = await self._db.fetchone("SELECT * FROM chats WHERE id=? AND user_id=? AND deleted_at IS NULL", (chat_id, user["id"]))
         if not chat:
             raise LookupError("chat")
         if await self._db.fetchone("SELECT id FROM runs WHERE chat_id=? AND status IN ('running','waiting')", (chat_id,)):
             raise RuntimeError("This chat already has an active run.")
+        for fid in files:                                    # an attachment must be the user's own, from this chat
+            up = await self._db.fetchone("SELECT filename,kind,rows,errors FROM uploads WHERE id=? AND user_id=? AND chat_id=?", (fid, user["id"], chat_id))
+            if not up:
+                raise LookupError("file")
+            note = f"{up['kind'] or 'layout not recognised'}, {up['rows']} row(s)" + (f", {up['errors']} row error(s)" if up["errors"] else "")
+            text += f"\n\n[Attached file: {up['filename']}, file_id={fid}, {note}]"
         now = iso(self._clock())
         async with self._db.tx() as t:
             run_id = await t.execute("INSERT INTO runs(chat_id,user_id,provider,model,status,started_at) VALUES(?,?,?,?,'running',?)",
@@ -258,7 +268,8 @@ class AgentService:
             backoff = await self._settings.get("wait.backoff")
             max_wait = int(await self._settings.get("wait.max_wait"))
             task_ctx = TaskContext(system["id"] if system else None, self._rfc, self._settings, binding, self._data_dir,
-                                   system["label"] if system else "", self._ssh, sid=system["sid"] if system else "", workflows=self._workflows)
+                                   system["label"] if system else "", self._ssh, sid=system["sid"] if system else "", workflows=self._workflows,
+                                   uploads=self._uploads, user_id=user["id"])
 
             async def cancelled():
                 return bool((await self._run(run_id))["cancel_requested"])

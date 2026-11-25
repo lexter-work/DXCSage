@@ -99,14 +99,32 @@ async function changeModel() {
   if (!current.value) return
   try { await patch(`api/chats/${current.value.id}`, { provider: current.value.provider, model: current.value.model }) } catch (e) { toast(e) }
 }
+// Excel change requests: attach a file (or just describe the changes in the message), and download a template.
+const pending = ref<any[]>([]), fileInput = ref<HTMLInputElement | null>(null), uploading = ref(false)
+const templates = [['user_roles', 'User roles (assign or unassign)'], ['role_auth', 'Role authorizations'], ['tcode_removal', 'Remove transaction codes']]
+async function onFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!current.value || !input.files?.length) return
+  uploading.value = true
+  try {
+    for (const f of Array.from(input.files)) {
+      const r = await fetch(`api/chats/${current.value.id}/uploads?filename=${encodeURIComponent(f.name)}`, { method: 'PUT', credentials: 'same-origin', body: f })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { toast(j.detail ?? 'The upload failed.'); continue }
+      pending.value.push(j)
+    }
+  } finally { uploading.value = false; input.value = '' }
+}
+const summary = (f: any) => (f.kind ? `${f.kind_title}: ${f.rows} row(s)` + (f.error_count ? `, ${f.error_count} row error(s)` : '') : 'layout not recognised')
 async function send() {
   if (!current.value || !text.value.trim() || activeRun.value) return
   const t = text.value; text.value = ''
+  const files = pending.value; pending.value = []
   try {
-    const { run_id } = await post(`api/chats/${current.value.id}/runs`, { text: t })
+    const { run_id } = await post(`api/chats/${current.value.id}/runs`, { text: t, files: files.map(f => f.id) })
     messages = await get(`api/chats/${current.value.id}/messages`)
     attach(run_id)
-  } catch (e) { text.value = t; toast(e) }
+  } catch (e) { text.value = t; pending.value = files; toast(e) }
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
 async function cancel() { if (activeRun.value) await post(`api/runs/${activeRun.value}/cancel`).catch(toast) }
@@ -231,9 +249,19 @@ onBeforeUnmount(() => { closeStream(); clearInterval(tick); window.removeEventLi
         <form class="box" @submit.prevent="send">
           <textarea v-model="text" rows="2" aria-label="Message" :disabled="!!activeRun"
                     :placeholder="activeRun ? 'Message Sage. It can\'t take new requests while this run is active.' : 'Message Sage'" @keydown="onKey" />
-          <div class="tools"><span class="sp" /><button class="btn primary sm" :disabled="!!activeRun || !text.trim()">Send</button></div>
+          <ul v-if="pending.length" class="attached" aria-label="Attached files">
+            <li v-for="f in pending" :key="f.id"><span><b>{{ f.filename }}</b> <span class="help">{{ summary(f) }}</span>
+              <span v-if="f.errors?.length" class="help bad block">{{ f.errors[0] }}</span></span>
+              <button type="button" class="btn sm ghost" :aria-label="`Remove ${f.filename}`" @click="pending = pending.filter(x => x.id !== f.id)">Remove</button></li>
+          </ul>
+          <div class="tools">
+            <input ref="fileInput" type="file" accept=".xlsx" multiple hidden @change="onFiles">
+            <button type="button" class="btn sm" :disabled="!!activeRun || uploading" @click="fileInput?.click()">Attach Excel</button>
+            <details class="tpl"><summary class="btn sm ghost">Templates</summary>
+              <div class="menu"><a v-for="t in templates" :key="t[0]" :href="`api/templates/${t[0]}.xlsx`" download>{{ t[1] }}</a></div></details>
+            <span class="sp" /><button class="btn primary sm" :disabled="!!activeRun || !text.trim()">Send</button></div>
         </form>
-        <div class="hint">Sage can only run workflows that an admin has set up and enabled on a system that passes its health check.</div>
+        <div class="hint">Sage can only run workflows that an admin has set up and enabled on a system that passes its health check. For role changes you can attach an Excel file or just describe the changes in the message.</div>
       </div>
     </div>
 

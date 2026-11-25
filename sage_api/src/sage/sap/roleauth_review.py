@@ -49,7 +49,7 @@ class Review(BaseModel):
 def clean(raw: list[RoleChange], max_entries: int) -> tuple[list[RoleChange], list[str]]:
     errors, seen, out = [], set(), []
     if not raw:
-        errors.append("The request has no changes.")
+        errors.append("The request has no changes. Give them in the list or attach an Excel file.")
     if len(raw) > max_entries:
         errors.append(f"The request has {len(raw)} changes; the limit is {max_entries} (setting rolechange.policy).")
     for c in raw:
@@ -94,7 +94,9 @@ async def _rows(ctx, table, fields, where):
     return await ctx.task(ReadTable, ReadTableIn(table=table, fields=fields, where=where))
 
 
-async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict]) -> Review:
+async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict], pre_errors: list[str] | None = None) -> Review:
+    if pre_errors:
+        return Review(ready=False, errors=pre_errors, warnings=[], violations=[], changes=[], roles=[], unverified_roles=[])
     changes, errors = clean(raw, int(policy.get("max_changes_per_request", 50)))
     warnings: list[str] = []
     if errors:

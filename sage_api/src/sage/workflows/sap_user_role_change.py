@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 from sage.runtime.errors import WorkflowFailed
 from sage.sap.sod import normalize_rules
-from sage.sap.userrole_review import Review, review
+from sage.sap.request_input import request_changes
+from sage.sap.userrole_review import Change, Review, review
 from sage.tasks.su01_user_roles import ChangeIn, ChangeUserRoles, Outcome
 from sage.util import utcnow
 from sage.workflows.sap_user_role_review import TABLES, ReviewInput
@@ -24,7 +25,8 @@ class SapUserRoleChange(Workflow):
     description = ("CHANGES SAP: assigns or unassigns roles for users (BAPI_USER_ACTGROUPS_ASSIGN), then reads each user back to verify. "
                    "Always ask the requester to confirm the exact list of changes before you call it. It first runs the review and "
                    "refuses if there is an error or the change would add a CRITICAL segregation-of-duties conflict. "
-                   "Use sap_user_role_review to preview.")
+                   "Use sap_user_role_review to preview. " +
+                   "Give the changes in the `changes` list (fill it from what the user wrote; no Excel file is needed) or pass the `file_id` of an Excel file the user attached (the file_id is in their message). Not both. ")
     Input, Output = ReviewInput, ChangeOutput
     tasks = (ChangeUserRoles,)
     extra_requirements = tuple(TableReadable(t, guide=f"Allow reading {t} for the RFC user.") for t in TABLES)
@@ -38,7 +40,8 @@ class SapUserRoleChange(Workflow):
             rules = normalize_rules(cfg["matrix"])
         except ValueError as e:
             raise WorkflowFailed(str(e)) from e
-        rv = await review(ctx, data.changes, rules, cfg["day"], int(cfg["max"]))
+        raw, errs = await request_changes(ctx, data.changes, data.file_id, ["user_roles"], lambda r: Change(**r))
+        rv = await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs)
         if not rv.ready:
             return ChangeOutput(executed=False, review=rv, results=[], message="Nothing was changed: " + " ".join(rv.errors))
         if not rv.changes:

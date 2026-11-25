@@ -19,6 +19,8 @@ class TaskContext:
     system_label: str = ""
     ssh: Any = None            # SapSsh, for tasks that read files on the host of the system
     sid: str = ""
+    uploads: Any = None        # UploadService, for tasks that read a file the user attached
+    user_id: int | None = None
     workflows: Any = None      # {name: Workflow class}; set for real runs so a workflow can inspect the installed ones
 
 

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sage.runtime.errors import WorkflowFailed
 from sage.sap.requirements import TableReadable
 from sage.sap.sod import normalize_rules
+from sage.sap.request_input import request_changes
 from sage.sap.userrole_review import Change, Review, review
 from sage.util import utcnow
 from sage.workflows.base import SystemInput, Workflow
@@ -13,7 +14,8 @@ TABLES = ("USR02", "AGR_USERS", "AGR_DEFINE", "AGR_AGRS", "AGR_1251")
 
 
 class ReviewInput(SystemInput):
-    changes: list[Change]
+    changes: list[Change] = []
+    file_id: str | None = None
 
 
 class SapUserRoleReview(Workflow):
@@ -21,7 +23,8 @@ class SapUserRoleReview(Workflow):
     description = ("Review a request to assign or unassign roles for SAP users before anyone changes anything: checks that the "
                    "users and roles exist, flags changes that do nothing, and compares each user's roles before and after with the "
                    "SoD matrix. 'ready' is false when there is an error or the change would add a CRITICAL conflict. Read-only. "
-                   "To apply the changes use sap_user_role_change.")
+                   "To apply the changes use sap_user_role_change. " +
+                   "Give the changes in the `changes` list (fill it from what the user wrote; no Excel file is needed) or pass the `file_id` of an Excel file the user attached (the file_id is in their message). Not both. ")
     Input, Output = ReviewInput, Review
     extra_requirements = tuple(TableReadable(t, guide=f"Allow reading {t} for the RFC user.") for t in TABLES)
 
@@ -34,4 +37,5 @@ class SapUserRoleReview(Workflow):
             rules = normalize_rules(cfg["matrix"])
         except ValueError as e:
             raise WorkflowFailed(str(e)) from e
-        return await review(ctx, data.changes, rules, cfg["day"], int(cfg["max"]))
+        raw, errs = await request_changes(ctx, data.changes, data.file_id, ["user_roles"], lambda r: Change(**r))
+        return await review(ctx, raw, rules, cfg["day"], int(cfg["max"]), errs)

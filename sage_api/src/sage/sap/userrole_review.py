@@ -35,7 +35,7 @@ class Review(BaseModel):
 def clean(raw: list[Change], max_entries: int) -> tuple[list[Change], list[str]]:
     errors, pairs = [], {}
     if not raw:
-        errors.append("The request has no changes.")
+        errors.append("The request has no changes. Give them in the list or attach an Excel file.")
     if len(raw) > max_entries:
         errors.append(f"The request has {len(raw)} changes; the limit is {max_entries} (setting rolechange.max_entries).")
     for c in raw:
@@ -53,7 +53,9 @@ def clean(raw: list[Change], max_entries: int) -> tuple[list[Change], list[str]]
     return out, errors
 
 
-async def review(ctx, raw: list[Change], rules: list[dict], day: str, max_entries: int) -> Review:
+async def review(ctx, raw: list[Change], rules: list[dict], day: str, max_entries: int, pre_errors: list[str] | None = None) -> Review:
+    if pre_errors:
+        return Review(ready=False, errors=pre_errors, warnings=[], changes=[], users=[], unverified_roles=[])
     changes, errors = clean(raw, max_entries)
     warnings: list[str] = []
     if errors or not changes:

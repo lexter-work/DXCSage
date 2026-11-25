@@ -3,7 +3,8 @@ changes nothing when the review has an error, a policy violation or a new CRITIC
 from pydantic import BaseModel
 
 from sage.sap.requirements import TableReadable
-from sage.sap.roleauth_review import Review
+from sage.sap.request_input import request_changes
+from sage.sap.roleauth_review import Review, RoleChange
 from sage.tasks.pfcg_role_auth import ChangeRoleAuth, DerivedIn, Done, RegenerateDerived, RemoveTcode, RoleChangeIn, TcodeIn, TcodeOut, Value
 from sage.workflows.base import Workflow
 from sage.workflows.sap_role_auth_review import TABLES, ReviewInput, load, review
@@ -24,14 +25,16 @@ class SapRoleAuthChange(Workflow):
                    "(custom function modules that drive PFCG), then regenerates the derived roles of every changed parent role. "
                    "Always ask the requester to confirm the exact list of changes before you call it. It first runs the review and "
                    "refuses on any error, policy violation or new CRITICAL SoD conflict. Roles are changed one at a time: if a role "
-                   "fails, the roles before it stay changed. Use sap_role_auth_review to preview.")
+                   "fails, the roles before it stay changed. Use sap_role_auth_review to preview. " +
+                   "Give the changes in the `changes` list (fill it from what the user wrote; no Excel file is needed) or pass the `file_id` of an Excel file the user attached (the file_id is in their message). Not both. ")
     Input, Output = ReviewInput, ChangeOutput
     tasks = (ChangeRoleAuth, RemoveTcode, RegenerateDerived)
     extra_requirements = tuple(TableReadable(t, guide=f"Allow reading {t} for the RFC user.") for t in TABLES)
 
     async def run(self, ctx, data: ReviewInput) -> ChangeOutput:
         policy, rules = await load(ctx)
-        rv = await review(ctx, data.changes, policy, rules)
+        raw, errs = await request_changes(ctx, data.changes, data.file_id, ["role_auth", "tcode_removal"], lambda r: RoleChange(**r))
+        rv = await review(ctx, raw, policy, rules, errs)
         empty = ChangeOutput(executed=False, review=rv, changes_applied=[], tcode_results=[], derived_regenerated=[], message="")
         if not rv.ready:
             return empty.model_copy(update={"message": "Nothing was changed: " + " ".join(rv.errors)})

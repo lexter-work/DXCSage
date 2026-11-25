@@ -2,10 +2,12 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from sage.deps import current_user
+from sage.sap.excel_requests import KINDS, build_template
+from sage.uploads import UploadError
 from sage.util import iso
 
 router = APIRouter(prefix="/api")
@@ -25,6 +27,7 @@ class ChatPatch(BaseModel):
 
 class Text(BaseModel):
     text: str
+    files: list[str] = []
 
 
 def _svc(request):
@@ -100,13 +103,38 @@ async def messages(chat_id: int, request: Request, user: dict = Depends(current_
     return await svc.db.fetchall("SELECT id,run_id,role,content,created_at FROM messages WHERE chat_id=? ORDER BY id", (chat_id,))
 
 
+@router.put("/chats/{chat_id}/uploads")
+async def upload(chat_id: int, filename: str, request: Request, user: dict = Depends(current_user)):
+    """The raw bytes of an .xlsx file are the request body. Returns what Sage recognised in it."""
+    svc = _svc(request)
+    await _own_chat(svc, chat_id, user)
+    data = await request.body()
+    try:
+        return await svc.uploads.save(user, chat_id, filename, data)
+    except UploadError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/templates/{kind}.xlsx")
+async def template(kind: str, user: dict = Depends(current_user)):
+    if kind not in KINDS:
+        raise HTTPException(404, "not_found")
+    return Response(build_template(kind), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="sage-{kind.replace("_", "-")}-template.xlsx"'})
+
+
+@router.get("/templates")
+async def templates(user: dict = Depends(current_user)):
+    return [{"kind": k, "title": v["title"], "url": f"api/templates/{k}.xlsx"} for k, v in KINDS.items()]
+
+
 @router.post("/chats/{chat_id}/runs")
 async def start_run(chat_id: int, body: Text, request: Request, user: dict = Depends(current_user)):
     svc = _svc(request)
     try:
-        run_id = await svc.agent.create_run(chat_id, user, body.text)
-    except LookupError:
-        raise HTTPException(404, "chat_not_found")
+        run_id = await svc.agent.create_run(chat_id, user, body.text, body.files)
+    except LookupError as e:
+        raise HTTPException(404, "file_not_found" if str(e) == "file" else "chat_not_found")
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     if not svc.manual_drive:
