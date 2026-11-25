@@ -5,22 +5,29 @@ import { get } from '../../api'
 import { toast } from '../../toast'
 
 const route = useRoute()
-const systems = ref<any[]>([]), list = ref<any[]>([]), doc = ref<any | null>(null)
+const systems = ref<any[]>([]), workflows = ref<any[]>([]), list = ref<any[]>([]), doc = ref<any | null>(null)
 const systemId = ref<number | ''>(route.query.system ? Number(route.query.system) : '')
+const workflow = ref<string>(String(route.query.workflow ?? ''))
 const pick = ref<string>(String(route.query.object ?? ''))
 const TABS = [['flow', 'Process flow'], ['create', 'How to create it'], ['code', 'ABAP code']] as const
 const tab = ref<(typeof TABS)[number][0]>('flow')
 const q = () => (systemId.value ? `?system_id=${systemId.value}` : '')
+const filtered = computed(() => workflow.value ? list.value.filter(o => o.used_by.includes(workflow.value)) : list.value)
 
 async function loadList() {
   list.value = await get(`api/abap-objects${q()}`)
-  if (!list.value.some(o => o.object_id === pick.value)) pick.value = list.value[0]?.object_id ?? ''
+  if (!filtered.value.some(o => o.object_id === pick.value)) pick.value = filtered.value[0]?.object_id ?? ''
 }
 async function loadDoc() { doc.value = pick.value ? await get(`api/abap-objects/${pick.value}${q()}`) : null }
 async function refresh() { try { await loadList(); await loadDoc() } catch (e) { toast(e) } }
 watch(pick, () => loadDoc().catch(toast))
 watch(systemId, refresh)
-onMounted(async () => { systems.value = (await get<any[]>('api/systems')).filter(s => s.status === 'active'); await refresh() })
+watch(workflow, () => { if (!filtered.value.some(o => o.object_id === pick.value)) pick.value = filtered.value[0]?.object_id ?? '' })
+onMounted(async () => {
+  systems.value = (await get<any[]>('api/systems')).filter(s => s.status === 'active')
+  workflows.value = await get<any[]>('api/workflows')
+  await refresh()
+})
 
 const code = computed(() => (doc.value?.parts ?? []) as any[])
 async function copy(text: string, what: string) { try { await navigator.clipboard.writeText(text); toast(`${what} copied`) } catch (e) { toast(e) } }
@@ -41,8 +48,13 @@ function onKey(e: KeyboardEvent) {
           <option value="">Original IDs</option>
           <option v-for="s in systems" :key="s.id" :value="s.id">{{ s.label }} ({{ s.sid }})</option>
         </select>
+        <label class="lbl" for="abap-wf">Used by workflow</label>
+        <select id="abap-wf" v-model="workflow" class="field">
+          <option value="">All workflows</option>
+          <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }}</option>
+        </select>
         <nav class="objs" aria-label="ABAP objects">
-          <button v-for="o in list" :key="o.object_id" :class="{ on: o.object_id === pick }" :aria-current="o.object_id === pick ? 'true' : undefined" @click="pick = o.object_id">
+          <button v-for="o in filtered" :key="o.object_id" :class="{ on: o.object_id === pick }" :aria-current="o.object_id === pick ? 'true' : undefined" @click="pick = o.object_id">
             <span class="mono">{{ o.name }}</span>
             <span class="help">{{ o.kind === 'function_group' ? 'Function group' : 'Function module' }}<template v-if="o.name !== o.object_id"> · ID {{ o.object_id }}</template></span>
           </button>
