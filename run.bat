@@ -22,6 +22,7 @@ echo ------------------------------------------
 echo   1  Start both       2  Stop both       3  Restart both
 echo   4  Start API        5  Stop API        6  Restart API
 echo   7  Start Web        8  Stop Web        9  Restart Web
+echo   U  Update (git pull)
 echo   O  Open the app in the browser
 echo   0  Exit
 echo ------------------------------------------
@@ -36,6 +37,7 @@ if "%c%"=="6" ( call :stop_port %API_PORT% API & call :wait & call :start_api & 
 if "%c%"=="7" ( call :start_web & goto done )
 if "%c%"=="8" ( call :stop_port %WEB_PORT% Web & goto done )
 if "%c%"=="9" ( call :stop_port %WEB_PORT% Web & call :wait & call :start_web & goto done )
+if /i "%c%"=="U" ( call :update & goto done )
 if /i "%c%"=="O" ( start "" "http://localhost:%WEB_PORT%" & goto menu )
 if "%c%"=="0" exit /b 0
 goto menu
@@ -69,7 +71,8 @@ if "%tgt%"=="" set "tgt=all"
 if /i "%~1"=="start" goto cli_start
 if /i "%~1"=="stop" goto cli_stop
 if /i "%~1"=="restart" goto cli_restart
-echo Usage: run.bat [start^|stop^|restart] [api^|web^|all]
+if /i "%~1"=="update" goto update
+echo Usage: run.bat [start^|stop^|restart] [api^|web^|all] ^| update
 exit /b 1
 
 :cli_start
@@ -86,6 +89,16 @@ exit /b 0
 call :cli_stop
 call :wait
 goto cli_start
+
+:update
+where git >nul 2>&1 || ( echo git is not installed or not on PATH. & exit /b 1 )
+call :stop_port %API_PORT% API
+call :stop_port %WEB_PORT% Web
+call :wait
+git pull || ( echo git pull failed; resolve it manually before starting again. & exit /b 1 )
+call :start_api
+call :start_web
+exit /b 0
 
 :: ---------- helpers ----------
 
