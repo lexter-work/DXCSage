@@ -10,4 +10,5 @@ dist/
 *.trc
 sage_api/vendor/nwrfcsdk/*
 !sage_api/vendor/nwrfcsdk/.gitkeep
+sage_api/vendor/pyrfc/
 _references/
