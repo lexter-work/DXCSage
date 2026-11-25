@@ -52,6 +52,12 @@ class FakeRfcClient:
             return True
 
         # conditions "FIELD = 'value'" joined by AND / OR, with parentheses
-        expr = re.sub(r"(\w+) = '([^']*)'", lambda m: f"ok({m[1]!r}, {m[2]!r})", where)
+        expr = re.sub(r"(\w+) (=|<>|LIKE) '([^']*)'", lambda m: f"ok({m[1]!r}, {m[2]!r}, {m[3]!r})", where)
         expr = re.sub(r"\bAND\b", "and", re.sub(r"\bOR\b", "or", expr))
-        return bool(eval(expr, {"__builtins__": {}}, {"ok": lambda f, v: str(row.get(f, "")).strip() == v.strip()}))
+
+        def ok(field, op, value):
+            have, want = str(row.get(field, "")).strip(), value.strip()
+            if op == "LIKE":
+                return re.fullmatch(re.escape(want).replace("%", ".*"), have) is not None
+            return (have == want) == (op == "=")
+        return bool(eval(expr, {"__builtins__": {}}, {"ok": ok}))
