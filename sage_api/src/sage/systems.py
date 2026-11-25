@@ -4,9 +4,11 @@ import re
 from cryptography.fernet import InvalidToken
 
 from sage.sap.rfc import RfcError, RfcParams
+from sage.sap.ssh import SshError, SshParams, fingerprint
 from sage.util import iso
 
-_PUBLIC = "id,label,sid,description,ashost,sysnr,client,rfc_user,status,created_at,updated_at"
+_PUBLIC = ("id,label,sid,description,ashost,sysnr,client,rfc_user,status,created_at,updated_at,"
+           "(SELECT COUNT(*) FROM system_ssh WHERE system_id=systems.id) AS ssh_configured")
 # Function modules and groups: optional /NAMESPACE/ prefix, then letters, digits and underscores; at most 30 characters.
 _ABAP_NAME = re.compile(r"^(/[A-Z0-9]{1,10}/)?[A-Z][A-Z0-9_]*$")
 _FIELDS = ("label", "sid", "description", "ashost", "sysnr", "client", "rfc_user")
@@ -39,6 +41,49 @@ class SystemsService:
             raise RfcError("LOGIN", "The stored RFC password cannot be decrypted. Enter the RFC password again.") from None
         return RfcParams(r["ashost"], r["sysnr"], r["client"], r["rfc_user"], passwd)
 
+    async def ssh_public(self, system_id) -> dict:
+        """What the UI may see of the SSH setup: never the secret."""
+        r = await self._db.fetchone("SELECT host,port,user,auth,host_key FROM system_ssh WHERE system_id=?", (system_id,))
+        if not r:
+            return {"configured": False}
+        return {"configured": True, "host": r["host"], "port": r["port"], "user": r["user"], "auth": r["auth"],
+                "trusted": bool(r["host_key"]), "fingerprint": fingerprint(r["host_key"]) if r["host_key"] else ""}
+
+    async def load_ssh(self, system_id) -> SshParams | None:
+        r = await self._db.fetchone("SELECT * FROM system_ssh WHERE system_id=?", (system_id,))
+        if not r:
+            return None
+        try:
+            secret = self._box.decrypt(r["secret_enc"])
+        except InvalidToken:
+            raise SshError("LOGIN", "The stored SSH secret cannot be decrypted. Enter it again.") from None
+        return SshParams(r["host"], r["port"], r["user"], r["auth"], secret, r["host_key"])
+
+    async def set_ssh(self, system_id, host, port, user, auth, secret, actor):
+        """Save the optional SSH access. A new host or port drops the trusted host key: an admin must trust it again."""
+        if auth == "key":
+            import asyncssh
+            try:
+                asyncssh.import_private_key(secret)
+            except (asyncssh.KeyImportError, asyncssh.KeyEncryptionError, ValueError):
+                raise SystemsError("bad_ssh_key") from None
+        old = await self._db.fetchone("SELECT host,port,host_key FROM system_ssh WHERE system_id=?", (system_id,))
+        keep = old["host_key"] if old and (old["host"], old["port"]) == (host, port) else ""
+        await self._db.execute(
+            "INSERT INTO system_ssh(system_id,host,port,user,auth,secret_enc,host_key,updated_at) VALUES(?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(system_id) DO UPDATE SET host=excluded.host, port=excluded.port, user=excluded.user, auth=excluded.auth, "
+            "secret_enc=excluded.secret_enc, host_key=excluded.host_key, updated_at=excluded.updated_at",
+            (system_id, host, port, user, auth, self._box.encrypt(secret), keep, iso()))
+        await self._audit.write("system.ssh", actor, detail={"system_id": system_id, "host": host, "port": port, "user": user, "auth": auth})
+
+    async def clear_ssh(self, system_id, actor):
+        await self._db.execute("DELETE FROM system_ssh WHERE system_id=?", (system_id,))
+        await self._audit.write("system.ssh_clear", actor, detail={"system_id": system_id})
+
+    async def trust_ssh_host_key(self, system_id, public_line, actor):
+        await self._db.execute("UPDATE system_ssh SET host_key=?, updated_at=? WHERE system_id=?", (public_line, iso(), system_id))
+        await self._audit.write("system.ssh_trust", actor, detail={"system_id": system_id, "fingerprint": fingerprint(public_line)})
+
     async def test(self, system_id) -> dict:
         try:
             await self._rfc.test(await self.load_params(system_id))
@@ -55,6 +100,9 @@ class SystemsService:
             "VALUES(?,?,?,?,?,?,?,?,'inactive',?,?)",
             (*(data.get(f, "") for f in _FIELDS), self._box.encrypt(data["rfc_password"]), now, now))
         await self._audit.write("system.create", actor, detail={k: data.get(k) for k in _FIELDS})
+        if data.get("ssh"):
+            s = data["ssh"]
+            await self.set_ssh(sid, s.get("host") or data["ashost"], s["port"], s["user"], s["auth"], s["secret"], actor)
         result = await self.test(sid)
         if result["ok"]:
             await self._db.execute("UPDATE systems SET status='active', updated_at=? WHERE id=?", (iso(), sid))

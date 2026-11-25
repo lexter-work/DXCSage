@@ -8,8 +8,8 @@ from sage.util import iso, parse_iso, utcnow
 
 
 class HealthService:
-    def __init__(self, db, audit, rfc, systems, settings, workflows, clock=utcnow):
-        self._db, self._audit, self._rfc, self._systems = db, audit, rfc, systems
+    def __init__(self, db, audit, rfc, systems, settings, workflows, clock=utcnow, ssh=None):
+        self._db, self._audit, self._rfc, self._systems, self._ssh = db, audit, rfc, systems, ssh
         self._settings, self._workflows, self._clock = settings, workflows, clock
 
     async def check(self, system_id, workflow, actor, binding=None) -> list[dict]:
@@ -22,7 +22,8 @@ class HealthService:
             await self._rfc.ping(system_id)
         except RfcError as e:
             ping_error = e
-        env = CheckEnv(self._rfc, system_id, system["rfc_user"], binding, self._settings, ping_error, await self._systems.abap_names(system_id))
+        env = CheckEnv(self._rfc, system_id, system["rfc_user"], binding, self._settings, ping_error, await self._systems.abap_names(system_id),
+                       ssh=self._ssh, sid=system["sid"])
         reqs = self._workflows[workflow].requirements()
         now, out = iso(self._clock()), []
         blocked = ping_error is not None

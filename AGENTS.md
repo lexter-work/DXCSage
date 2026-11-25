@@ -11,7 +11,8 @@ This file is the one instruction file for every coding agent; `CLAUDE.md` only i
 
 ## Rules
 - No `.env` settings and no JSON configs: settings and secrets live in the DB. `.env` has only the bootstrap admin.
-- SAP access is PyRFC only (no hdbsql, no SSH). Reads go through `RFC_READ_TABLE`.
+- SAP access is PyRFC (no hdbsql). Reads go through `RFC_READ_TABLE`.
+- SSH is an optional extra per system, only for what RFC cannot reach (the files and processes of SUM). Never run a typed or model-written command: `SapSsh` has fixed read-only methods that validate the path. The host key is pinned by an admin before any login. Secrets live encrypted in the DB.
 - The model sees workflows only. Workflows are built from shared tasks in `tasks/`; never copy a task into a workflow.
 - Every task call goes through `ctx.task` / `ctx.wait` so it is a stored, replayable, audited step.
 - Health checks never call write or job-scheduling function modules.

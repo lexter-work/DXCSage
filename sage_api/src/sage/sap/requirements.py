@@ -27,6 +27,8 @@ class CheckEnv:
     ping_error: RfcError | None = None
     names: dict[str, str] = field(default_factory=dict)   # abap_object_id -> this system's name
     done: dict = field(default_factory=dict)              # (kind, key) -> CheckResult of requirements checked before this one
+    ssh: Any = None                                       # SapSsh
+    sid: str = ""
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,43 @@ class SettingPresent(Requirement):
     async def check(self, env):
         val = env.binding.get(self.key) if self.scope == "binding" else await env.settings.get(self.key)
         return CheckResult(status="pass") if val else CheckResult(status=self.level, message=f"setting '{self.key}' is not set")
+
+
+@dataclass(frozen=True)
+class SshLogin(Requirement):
+    """The workflow reads files on the host of the system, so the system needs optional SSH access with a trusted host key."""
+    kind: ClassVar[str] = "ssh_login"
+
+    async def check(self, env):
+        from sage.sap.ssh import SshError
+        try:
+            await env.ssh.test(await env.ssh.params(env.system_id))
+        except SshError as e:
+            return CheckResult(status="fail", message=f"{e.code}: {e.message}")
+        return CheckResult(status="pass")
+
+
+@dataclass(frozen=True)
+class FileReadable(Requirement):
+    """A file on the host (key = absolute path, {sid} is replaced by the system ID in lower or upper case as written)."""
+    kind: ClassVar[str] = "file_readable"
+
+    def path(self, sid: str) -> str:
+        return self.key.replace("{SID}", sid.upper()).replace("{sid}", sid.lower())
+
+    async def check(self, env):
+        from sage.sap.ssh import SshError
+        ssh_state = env.done.get(("ssh_login", ""))
+        if ssh_state is not None and ssh_state.status != "pass":
+            return CheckResult(status="blocked", message="SSH login does not work")
+        try:
+            ok = await env.ssh.file_readable(env.system_id, self.path(env.sid))
+        except SshError as e:
+            return CheckResult(status="fail", message=f"{e.code}: {e.message}")
+        return CheckResult(status="pass") if ok else CheckResult(status="fail", message=f"{self.path(env.sid)} is missing or not readable by the SSH user")
+
+    def title(self):
+        return f"file: {self.key}"
 
 
 @dataclass(frozen=True)

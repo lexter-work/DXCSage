@@ -20,10 +20,10 @@ SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided 
 
 
 class AgentService:
-    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, clock=utcnow, poll_seconds=5):
+    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, clock=utcnow, poll_seconds=5):
         self._db, self._audit, self._settings, self._providers = db, audit, settings, providers
         self._workflows, self._setup, self._rfc, self._data_dir, self._usage = workflows, setup, rfc, data_dir, usage
-        self._clock, self._poll = clock, poll_seconds
+        self._clock, self._poll, self._ssh = clock, poll_seconds, ssh
         self._tasks: dict[int, asyncio.Task] = {}
         self._scheduler: asyncio.Task | None = None
 
@@ -196,7 +196,7 @@ class AgentService:
             backoff = await self._settings.get("wait.backoff")
             max_wait = int(await self._settings.get("wait.max_wait"))
             task_ctx = TaskContext(system["id"] if system else None, self._rfc, self._settings, binding, self._data_dir,
-                                   system["label"] if system else "", self._workflows)
+                                   system["label"] if system else "", self._ssh, self._workflows)
 
             async def cancelled():
                 return bool((await self._run(run_id))["cancel_requested"])

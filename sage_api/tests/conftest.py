@@ -46,10 +46,17 @@ def app_kwargs():
     return {}
 
 
+@pytest.fixture
+def fake_ssh():
+    from tests.fakes import FakeSsh
+    return FakeSsh()
+
+
 @pytest_asyncio.fixture
-async def app(tmp_path, fake_rfc, app_kwargs, monkeypatch):
+async def app(tmp_path, fake_rfc, fake_ssh, app_kwargs, monkeypatch):
     monkeypatch.setenv("SAGE_TEST_MANUAL_DRIVE", "1")
-    kw = dict(data_dir=tmp_path / "data", key_dir=tmp_path / "keys", env=BOOT, connector=lambda p: fake_rfc)
+    kw = dict(data_dir=tmp_path / "data", key_dir=tmp_path / "keys", env=BOOT, connector=lambda p: fake_rfc,
+              ssh_connector=fake_ssh.connector, ssh_host_key=fake_ssh.host_key)
     kw.update(app_kwargs)
     a = create_app(**kw)
     async with a.router.lifespan_context(a):

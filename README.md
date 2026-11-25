@@ -36,7 +36,7 @@ The model sees workflows only. Each one is built from shared tasks, and every ta
 | `sap_role_auth_review` | Previews a request to change role authorizations: roles and values exist, policy, SoD before and after. | No | none | `sod.matrix`, `rolechange.policy` |
 | `sap_role_auth_change` | Adds, removes or modifies authorization values and removes transaction codes on roles, then regenerates derived roles. Runs the review first and refuses on an error, a policy violation or a new CRITICAL conflict. | **Yes** | `ZFM_RR_ROLE_AUTH_CHANGE`, `ZFM_RR_TCODE_REMOVE`, `ZFM_RR_DERIVED_REGENERATE` | same as above |
 
-Not ported from the old tool: SUM monitoring (needs SSH or HTTP; Sage uses PyRFC only), the Excel upload and report steps, and the AI review of free-form policy documents.
+Not ported from the old tool: the Excel upload and report steps, and the AI review of free-form policy documents.
 
 ### Setting up a workflow on a system
 Open the workflow on the Workflows page, choose the system and follow the setup guide. It lists every requirement (connection, function modules, tables, authorizations, settings) with its status. The ABAP objects page shows, for each custom object, its process flow, how to create it and the ABAP code to paste, using the names of the chosen system. Each system may name a custom object differently: enter its name in the guide and Sage keeps the fixed object ID. The health check compares every authorization a workflow needs with the RFC user, so you can send the security team one request with everything that is missing.

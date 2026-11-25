@@ -11,6 +11,8 @@ _DEFAULT_GUIDE = {
     "table_readable": "Add S_TABU_NAM (or S_TABU_DIS for the table's authorization group) with ACTVT 03 for the table.",
     "setting": "Fill in this value on the workflow setup page.",
     "auth_declared": "These values are checked inside a standard SAP report, so no scan can find them. Ask the security team to add them to the RFC user's role.",
+    "ssh_login": "Add SSH access for this system on the Systems page (host, user, and a password or private key), then test it and trust the host key. SSH is only used to read files and check processes on the host.",
+    "file_readable": "The SSH user must be able to read this file on the host. Check the path and the file permissions (the SSH user usually needs to be in the group of the SAP administration user).",
     "auth_coverage": "Compares every authorization value the workflow needs with the RFC user. Send the missing values to the security team in one request (see the table on this page).",
 }
 

@@ -14,7 +14,7 @@ Small agentic harness, a simplified rebuild of Citadel. Providers: Claude and GP
 | Storage | SQLite (WAL), Docker compose, two containers |
 | Providers | `Provider` interface, Claude and GPT adapters, one common event shape |
 | Tools | Workflows (Python classes, fixed steps) built from shared task tools |
-| SAP access | PyRFC only. No hdbsql, no hdbuserstore, no SSH. Table reads through standard `RFC_READ_TABLE` |
+| SAP access | PyRFC. No hdbsql, no hdbuserstore. Table reads through standard `RFC_READ_TABLE`. Optional SSH per system, only for host files (see Optional SSH) |
 | Limits | No usage limits. Usage counts only. Loop-turn cap per run is a safety cap, not a usage limit |
 | Audit | Every request, task and admin action. Append-only, hash-chained |
 | Chat delete | Soft delete. Runs, tool calls and audit stay |
@@ -272,3 +272,12 @@ Every workflow's health check ends with an `auth_coverage` requirement that list
 - **Status:** any `missing` fails the requirement and blocks enabling; `review`, `unknown` or a scan that could not run only warn. `ZFM_AUTH_REQ_LIST` is a recommended, not required, function module (`level="warn"`): without it the declared values are still checked.
 - **Stored** in `auth_checks` (replaced on every check). The setup guide shows them with the object, field, value, which function module needs them and the status, and "Copy request for security" copies one grouped text of everything missing or to be confirmed.
 - Requirements have a `level`: `warn` turns a failure of that requirement into a warning.
+
+## Optional SSH (per system)
+Added for SUM monitoring, whose state lives in files on the host, not in RFC-reachable tables.
+- **Registration:** an admin may add SSH access when registering a system, or later on the system's page: host (default the application server), port, user, and a password or a private key without passphrase. It is optional. A system without it works as before.
+- **Storage:** table `system_ssh` (one row per system). The secret is encrypted with the master key like the RFC password, never returned by any API, and audited as changed only.
+- **Host key pinning:** Sage never logs in to an unknown server. The test reads the key the server presents; the admin compares the fingerprint and trusts it; only then does a login happen. A new host or port drops the trust. A changed key blocks the login and the test says so.
+- **What can run:** `SapSsh` has fixed methods only: `read_file` (tail of a validated absolute path), `file_readable`, `process_running`. No method takes a command string. Workflows and the model cannot run a command.
+- **Health:** `SshLogin` (SSH set up, key trusted, login works) and `FileReadable(path)` (`{SID}` is replaced by the system ID) are requirements like the RFC ones. They show in the setup guide.
+- **Not included:** starting or stopping SUM, and e-mail or Teams alerts.

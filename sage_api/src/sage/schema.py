@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS systems(
   rfc_password_enc TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('inactive','active','disabled')),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS system_ssh(
+  system_id INTEGER PRIMARY KEY REFERENCES systems(id), host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL,
+  auth TEXT NOT NULL CHECK(auth IN ('password','key')), secret_enc TEXT NOT NULL, host_key TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS system_health(
   id INTEGER PRIMARY KEY, system_id INTEGER NOT NULL REFERENCES systems(id), workflow TEXT NOT NULL,
   req_kind TEXT NOT NULL, req_key TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL,

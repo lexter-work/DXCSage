@@ -61,3 +61,61 @@ class FakeRfcClient:
                 return re.fullmatch(re.escape(want).replace("%", ".*"), have) is not None
             return (have == want) == (op == "=")
         return bool(eval(expr, {"__builtins__": {}}, {"ok": ok}))
+
+
+class FakeSsh:
+    """Stands in for asyncssh. One host with files; the right login is user/secret."""
+
+    def __init__(self):
+        import asyncssh
+        self.host_key_line = asyncssh.generate_private_key("ssh-ed25519").export_public_key("openssh").decode().strip()
+        self.files: dict[str, str] = {}
+        self.running: set[str] = set()
+        self.user, self.secret = "sumadm", "ssh-pass-1"
+        self.commands: list[str] = []
+        self.down = False
+
+    async def host_key(self, host, port):
+        from sage.sap.ssh import SshError
+        if self.down:
+            raise SshError("CONNECT", "no route to host")
+        return self.host_key_line
+
+    async def connector(self, p):
+        from sage.sap.ssh import SshError
+        if self.down:
+            raise SshError("CONNECT", "no route to host")
+        if p.host_key.split()[:2] != self.host_key_line.split()[:2]:
+            raise SshError("HOST_KEY", "The server presented a different host key than the trusted one.")
+        if (p.user, p.secret) != (self.user, self.secret):
+            raise SshError("LOGIN", "The server refused the SSH user or secret.")
+        return _FakeSshClient(self)
+
+
+class _FakeSshClient:
+    def __init__(self, world):
+        self.w = world
+
+    async def run(self, command, timeout):
+        import shlex
+        from sage.sap.ssh import SshResult
+        self.w.commands.append(command)
+        argv = shlex.split(command)
+        if argv[0] == "true":
+            return SshResult("", "", 0)
+        if argv[0] == "test":
+            return SshResult("", "", 0 if argv[-1] in self.w.files else 1)
+        if argv[0] == "pgrep":
+            return SshResult("", "", 0 if argv[-1] in self.w.running else 1)
+        if argv[0] == "tail":
+            path = argv[-1]
+            if path not in self.w.files:
+                return SshResult("", f"tail: cannot open '{path}' for reading", 1)
+            text = self.w.files[path]
+            if argv[1] == "-n":
+                text = "\n".join(text.splitlines()[-int(argv[2]):])
+            return SshResult(text, "", 0)
+        return SshResult("", "unknown command", 127)
+
+    async def close(self):
+        pass
