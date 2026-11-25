@@ -95,7 +95,7 @@ class FmAuthorized(Requirement):
     async def check(self, env):
         # SUSR_USER_AUTH_FOR_OBJ_GET must be remote-enabled and allowed for the account.
         try:
-            res = await env.rfc.call(env.system_id, "SUSR_USER_AUTH_FOR_OBJ_GET", USERNAME=env.rfc_user, OBJECT="S_RFC")
+            res = await env.rfc.call(env.system_id, "SUSR_USER_AUTH_FOR_OBJ_GET", USER_NAME=env.rfc_user, OBJECT="S_RFC")
         except RfcError as e:
             return CheckResult(status="warn", message=f"cannot verify S_RFC ({e.code}): {e.message}")
         vals: dict[str, list[str]] = {}
