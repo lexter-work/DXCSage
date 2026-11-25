@@ -144,8 +144,13 @@ call :refreshpath
 exit /b 0
 
 :ensure_pyrfc
-if "%PYRFC_SRC%"=="" exit /b 0
-if "%SAPNWRFC_HOME%"=="" ( echo PYRFC_SRC is set but SAPNWRFC_HOME is not; skipping pyrfc build. & exit /b 0 )
+if "%SAPNWRFC_HOME%"=="" exit /b 0
+if "%PYRFC_SRC%"=="" set "PYRFC_SRC=%~dp0sage_api\vendor\pyrfc"
+if not exist "%PYRFC_SRC%" (
+  where git >nul 2>&1 || ( echo PYRFC_SRC not found and git is not installed; cannot fetch pyrfc source. & exit /b 0 )
+  echo %PYRFC_SRC% not found. Cloning SAP/PyRFC there...
+  git clone https://github.com/SAP/PyRFC "%PYRFC_SRC%"
+)
 pushd "%~dp0sage_api"
 uv run python -c "import pyrfc; assert hasattr(pyrfc,'Connection')" >nul 2>&1
 if not errorlevel 1 ( popd & exit /b 0 )
