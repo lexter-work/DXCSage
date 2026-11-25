@@ -143,6 +143,18 @@ winget install -e --id pnpm.pnpm --accept-package-agreements --accept-source-agr
 call :refreshpath
 exit /b 0
 
+:ensure_pyrfc
+if "%PYRFC_SRC%"=="" exit /b 0
+if "%SAPNWRFC_HOME%"=="" ( echo PYRFC_SRC is set but SAPNWRFC_HOME is not; skipping pyrfc build. & exit /b 0 )
+pushd "%~dp0sage_api"
+uv run python -c "import pyrfc; assert hasattr(pyrfc,'Connection')" >nul 2>&1
+if not errorlevel 1 ( popd & exit /b 0 )
+echo pyrfc is not installed. Building it from %PYRFC_SRC% ...
+set "PYRFC_BUILD_CYTHON=1"
+uv pip install --no-build-isolation "%PYRFC_SRC%"
+popd
+exit /b 0
+
 :start_api
 call :isup %API_PORT% && ( echo API is already running on port %API_PORT%. & exit /b 0 )
 where uv >nul 2>&1 || call :install_uv
@@ -152,6 +164,7 @@ if not exist "%~dp0sage_api\.venv" (
   echo First run: installing API dependencies...
   pushd "%~dp0sage_api" & call uv sync & popd
 )
+call :ensure_pyrfc
 start "" /b /d "%~dp0sage_api" cmd /c uv run uvicorn sage.app:create_app --factory --host 127.0.0.1 --port %API_PORT% >>"%~dp0sage_api\api.log" 2>&1
 echo API starting on http://localhost:%API_PORT% (log: sage_api\api.log).
 exit /b 0
