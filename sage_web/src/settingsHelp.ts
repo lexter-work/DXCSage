@@ -74,6 +74,12 @@ export const SETTINGS_HELP: Record<string, SettingHelp> = {
     fallback: 'The twelve core S/4HANA components: SAP_BASIS, SAP_ABA, SAP_GWFND, SAP_UI, S4CORE, S4COREOP, S4DEPREC, S4FND, EA-DFPS, EA-PS, FI-CAX, SAP_BW.',
     effect: 'Read when a guide starts. A listed component is reported as protected and gets no work order. Remove a name only if you are sure the component is not core on your systems.',
   },
+  'rolechange.max_entries': {
+    summary: 'The most changes one role-change request may hold.',
+    format: 'A whole number.',
+    fallback: '50',
+    effect: 'The user-role review and the user-role change refuse a larger request. Raise it only if people need bigger batches.',
+  },
   'sod.matrix': {
     summary: 'The segregation-of-duties rules the user SoD check workflow compares the roles of a user against.',
     format: 'JSON object with "conflicts", a list of rules. Each rule has "id", "object_1" and "object_2" (more sides as "object_3" and so on), "description", "risk_level" (CRITICAL, HIGH, MEDIUM or LOW) and "recommended_action". A side is an authorization object or a transaction code. Add "activity_1", "activity_2" (for example "01,02") to count a side only when the role grants one of those ACTVT codes. Names may use letters, digits and _ / . $ # @ -.',

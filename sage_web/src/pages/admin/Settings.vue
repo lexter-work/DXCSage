@@ -9,7 +9,7 @@ import { toast } from '../../toast'
 
 const raw = ref<Record<string, any>>({}), sel = ref<string | null>(null), text = ref('')
 const isSecret = (v: any) => v && typeof v === 'object' && 'set' in v && Object.keys(v).length === 1
-const GROUPS: [string, string[]][] = [['Providers', ['providers.']], ['Agent and waiting', ['agent.', 'wait.']], ['SAP and health', ['sap.', 'health.']], ['Workflows', ['workflows.', 'readiness.', 'sod.', 'addon.']]]
+const GROUPS: [string, string[]][] = [['Providers', ['providers.']], ['Agent and waiting', ['agent.', 'wait.']], ['SAP and health', ['sap.', 'health.']], ['Workflows', ['workflows.', 'readiness.', 'sod.', 'addon.', 'rolechange.']]]
 const grouped = computed(() => GROUPS.map(([label, prefixes]) => [label, Object.entries(raw.value).filter(([k]) => prefixes.some(p => k.startsWith(p))).map(([key, v]) => ({
   key, secret: isSecret(v), set: isSecret(v) && v.set, value: JSON.stringify(v),
 }))] as const).filter(([, l]) => l.length))

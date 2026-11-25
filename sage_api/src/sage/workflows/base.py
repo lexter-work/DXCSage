@@ -54,7 +54,7 @@ class Workflow(ABC):
         """(abap_object_id, kind) of every custom ABAP object this workflow needs. IDs are fixed; each system may name them differently."""
         out: dict[str, str] = {}
         for r in cls.requirements():
-            if r.kind in ("fm_exists", "fm_authorized"):
+            if r.kind in ("fm_exists", "fm_authorized") and r.key[:1] in ("Z", "Y", "/"):      # custom objects only, not standard SAP modules
                 out.setdefault(r.key, "function_module")
             if getattr(r, "group", ""):
                 out.setdefault(r.group, "function_group")

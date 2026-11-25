@@ -21,6 +21,7 @@ DEFAULTS: dict = {
     "workflows.disabled": [],
     "addon.protected_components": ["SAP_BASIS", "SAP_ABA", "SAP_GWFND", "SAP_UI", "S4CORE", "S4COREOP", "S4DEPREC", "S4FND",
                                    "EA-DFPS", "EA-PS", "FI-CAX", "SAP_BW"],
+    "rolechange.max_entries": 50,
     "sod.matrix": {
         "matrix_version": "1.0.0",
         "conflicts": [
