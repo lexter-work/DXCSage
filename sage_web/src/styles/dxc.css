@@ -513,6 +513,12 @@ tbody tr.click:focus-visible td{background:var(--sunken)}
 .sidecard table td,.sidecard table th{padding-left:8px;padding-right:8px}
 .sidecard table td:first-child,.sidecard table th:first-child{padding-left:16px}
 
+/* ---------- email groups ---------- */
+.members{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:4px}
+.members li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 12px}
+.members li+li{border-top:1px solid var(--line)}
+.notif .row{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.notif .evs{display:flex;flex-wrap:wrap;gap:6px 16px;padding-left:24px}
 /* ---------- ABAP objects page ---------- */
 .abap{display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;align-items:start}
 .abaplist{display:flex;flex-direction:column;gap:8px}

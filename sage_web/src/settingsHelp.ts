@@ -74,6 +74,48 @@ export const SETTINGS_HELP: Record<string, SettingHelp> = {
     fallback: 'The twelve core S/4HANA components: SAP_BASIS, SAP_ABA, SAP_GWFND, SAP_UI, S4CORE, S4COREOP, S4DEPREC, S4FND, EA-DFPS, EA-PS, FI-CAX, SAP_BW.',
     effect: 'Read when a guide starts. A listed component is reported as protected and gets no work order. Remove a name only if you are sure the component is not core on your systems.',
   },
+  'email.enabled': {
+    summary: 'Turns the sending of state emails on or off.',
+    format: 'true or false.',
+    fallback: 'false (no email is sent).',
+    effect: 'Used when a workflow changes state and an email group is tagged for it. Turn it on after you set the mail server and the from address, then send a test email on the Email groups page.',
+  },
+  'email.smtp_host': {
+    summary: 'The mail server (SMTP) Sage sends through.',
+    format: 'A host name, for example "smtp.example.com".',
+    fallback: 'Empty (email cannot be sent).',
+    effect: 'Read each time an email is sent.',
+  },
+  'email.smtp_port': {
+    summary: 'The port of the mail server.',
+    format: 'A whole number: usually 587 for STARTTLS, 465 for SSL, 25 for none.',
+    fallback: '587',
+    effect: 'Read each time an email is sent.',
+  },
+  'email.security': {
+    summary: 'How the connection to the mail server is protected.',
+    format: '"starttls", "ssl" or "none". The server certificate is always checked for starttls and ssl.',
+    fallback: '"starttls"',
+    effect: 'Use "none" only for a relay inside a trusted network: the login and the mail travel unprotected.',
+  },
+  'email.smtp_user': {
+    summary: 'The user Sage logs in to the mail server with.',
+    format: 'A user name, or empty when the server needs no login.',
+    fallback: 'Empty (no login).',
+    effect: 'Used together with the password.',
+  },
+  'email.smtp_password': {
+    summary: 'The password for the mail server user.',
+    format: 'A text value. Stored encrypted, and never shown again once saved.',
+    fallback: 'Not set.',
+    effect: 'Used together with the user.',
+  },
+  'email.from_address': {
+    summary: 'The address emails are sent from.',
+    format: 'An email address, for example "sage@example.com".',
+    fallback: 'Empty (email cannot be sent).',
+    effect: 'The recipients are hidden from each other: every email is addressed to this address and the group members get a blind copy.',
+  },
   'rolechange.max_entries': {
     summary: 'The most changes one role-change request may hold.',
     format: 'A whole number.',

@@ -46,6 +46,14 @@ SSH is optional and per system. An admin can add it when registering a system or
 
 The two workflows that write to SAP ask the model to get the requester's confirmation first, and their reviews are the gate: a write never runs after a failed review. Test the write function modules in a sandbox client before any other system.
 
+## Email notifications
+Workflows can send an email when they change state.
+1. Settings: set `email.smtp_host`, `email.smtp_port`, `email.security`, optionally `email.smtp_user` and `email.smtp_password`, `email.from_address`, then `email.enabled`.
+2. Email groups page: make groups of recipients. A member is just an email address, so people outside Sage can be added. Send a test email there.
+3. Workflows page, **Email notifications** on a workflow: tag one or more groups and choose the states: started, waiting (long runs), completed, failed, cancelled, and for a status workflow its result states (for example `sap_sum_status` can mail on ERROR, POSSIBLE_HANG or PROCESS_DEAD).
+
+An email states the workflow, the system, who asked, the state and, for a failure, the error text. It never contains results. Recipients get a blind copy, so they cannot see each other. A failed send never affects the run; it shows under Recent emails on the Email groups page. Each state of one run is mailed once, also after a restart. A workflow only mails when someone runs it, because Sage has no scheduler for recurring runs yet.
+
 ## Backups
 Back up both volumes: `sage_data` (SQLite) and `sage_keys` (the master key). The key alone is useless and the DB without the key cannot decrypt stored passwords.
 

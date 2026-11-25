@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { get, put } from '../../api'
+import Drawer from '../../components/Drawer.vue'
 import StatusPill from '../../components/StatusPill.vue'
 import { toast } from '../../toast'
 
@@ -14,6 +15,23 @@ async function setUp(w: any) {
   if (!id) return toast('Choose a system first.')
   try { await put(`api/workflows/${w.name}/systems/${id}`, { settings: {} }); router.push(`/admin/workflows/${w.name}/${id}`) } catch (e) { toast(e) }
 }
+// Email notifications: which groups get an email on which state of the workflow.
+const nf = ref<any | null>(null), allGroups = ref<any[]>([])
+async function openNotif(w: any) {
+  try {
+    const r = await get(`api/workflows/${w.name}/notifications`)
+    allGroups.value = await get('api/email/groups')
+    const sel: Record<number, string[]> = {}
+    for (const x of r.rules) sel[x.group_id] = [...x.events]
+    nf.value = { name: w.name, events: r.events, sel }
+  } catch (e) { toast(e) }
+}
+function toggleGroup(gid: number) { const s = nf.value.sel; if (s[gid]) delete s[gid]; else s[gid] = ['completed', 'failed'] }
+function toggleEvent(gid: number, key: string) { const a: string[] = nf.value.sel[gid]; const i = a.indexOf(key); if (i < 0) a.push(key); else a.splice(i, 1) }
+async function saveNotif() {
+  const rules = Object.entries(nf.value.sel as Record<string, string[]>).map(([g, events]) => ({ group_id: Number(g), events }))
+  try { await put(`api/workflows/${nf.value.name}/notifications`, { rules }); toast('Email notifications saved'); nf.value = null } catch (e) { toast(e) }
+}
 onMounted(load)
 </script>
 <template>
@@ -24,7 +42,8 @@ onMounted(load)
         <h2>{{ w.name }}</h2>
         <div class="tags"><StatusPill :status="w.enabled ? 'enabled' : 'disabled'" /><span v-if="w.durable" class="pill off">Long-running</span></div>
         <p class="desc">{{ w.description }}</p>
-        <button class="btn sm" :class="{ primary: !w.enabled }" @click="setState(w)">{{ w.enabled ? 'Disable workflow' : 'Enable workflow' }}</button>
+        <div class="rowx"><button class="btn sm" :class="{ primary: !w.enabled }" @click="setState(w)">{{ w.enabled ? 'Disable workflow' : 'Enable workflow' }}</button>
+          <button class="btn sm ghost" @click="openNotif(w)">Email notifications</button></div>
       </div>
       <div>
         <div v-if="w.bindings.length" class="panel tablewrap"><table>
@@ -45,5 +64,21 @@ onMounted(load)
       </div>
     </div>
     <p v-if="!workflows.length" class="muted">No workflows are installed.</p>
+
+    <Drawer :open="!!nf" :title="nf ? `Email notifications: ${nf.name}` : ''" mono @close="nf = null">
+      <template v-if="nf">
+        <div class="callout info"><span>Tag the groups that get an email when this workflow changes state, and choose which states. Groups are made on the <router-link to="/admin/email">Email groups</router-link> page. Emails state the system, who asked and the state, never results.</span></div>
+        <p v-if="!allGroups.length" class="muted">No email group exists yet.</p>
+        <div class="notif">
+          <div v-for="g in allGroups" :key="g.id" class="row">
+            <label class="chk"><input type="checkbox" :checked="!!nf.sel[g.id]" @change="toggleGroup(g.id)"> <b>{{ g.name }}</b> <span class="help">{{ g.members }} {{ g.members === 1 ? 'person' : 'people' }}</span></label>
+            <div v-if="nf.sel[g.id]" class="evs">
+              <label v-for="e in nf.events" :key="e.key" class="chk"><input type="checkbox" :checked="nf.sel[g.id].includes(e.key)" @change="toggleEvent(g.id, e.key)"> {{ e.label }}</label>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer><button class="btn" @click="nf = null">Cancel</button><button class="btn primary" @click="saveNotif">Save</button></template>
+    </Drawer>
   </section>
 </template>

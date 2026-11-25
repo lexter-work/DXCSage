@@ -281,3 +281,11 @@ Added for SUM monitoring, whose state lives in files on the host, not in RFC-rea
 - **What can run:** `SapSsh` has fixed methods only: `read_file` (tail of a validated absolute path), `file_readable`, `process_running`. No method takes a command string. Workflows and the model cannot run a command.
 - **Health:** `SshLogin` (SSH set up, key trusted, login works) and `FileReadable(path)` (`{SID}` is replaced by the system ID) are requirements like the RFC ones. They show in the setup guide.
 - **Not included:** starting or stopping SUM, and e-mail or Teams alerts.
+
+## Email notifications
+- **Settings:** `email.enabled`, `email.smtp_host`, `email.smtp_port`, `email.security` (starttls, ssl, none), `email.smtp_user`, `email.smtp_password` (secret), `email.from_address`. Sending uses `smtplib` in a thread.
+- **Groups:** tables `email_groups` and `email_group_members` (address and optional name; no Sage account needed). Group names are unique, any case. Deleting a group removes its members and its rules.
+- **Rules:** `workflow_notifications(workflow, group_id, events)`. A workflow can have many groups. Events: `started`, `waiting` (durable workflows only), `completed`, `failed`, `cancelled`, and `result:<STATE>` for the states a workflow declares in `result_states` and reports through `result_state(output)`.
+- **Sending:** `AgentService` calls `EmailService.notify` at each transition of a workflow call. It queues a task, never raises and never blocks the run. `email_log` has a unique (tool call, event) pair, so a replay after a restart does not send twice. Recipients are a blind copy, and the To header is the from address.
+- **Content:** workflow, system, requester, state, run, time, and the error text of a failure. Never the output of a workflow, because groups may include people outside Sage.
+- **Not included:** recurring runs (so a status workflow mails only when someone runs it), and digest or throttled mail.

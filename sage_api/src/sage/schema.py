@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS system_ssh(
   system_id INTEGER PRIMARY KEY REFERENCES systems(id), host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL,
   auth TEXT NOT NULL CHECK(auth IN ('password','key')), secret_enc TEXT NOT NULL, host_key TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS email_groups(
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, description TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS email_group_members(
+  id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES email_groups(id) ON DELETE CASCADE,
+  email TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', UNIQUE(group_id, email));
+CREATE TABLE IF NOT EXISTS workflow_notifications(
+  workflow TEXT NOT NULL, group_id INTEGER NOT NULL REFERENCES email_groups(id) ON DELETE CASCADE,
+  events TEXT NOT NULL, PRIMARY KEY(workflow, group_id));
+CREATE TABLE IF NOT EXISTS email_log(
+  id INTEGER PRIMARY KEY, tool_call_id INTEGER NOT NULL, run_id INTEGER NOT NULL, workflow TEXT NOT NULL, event TEXT NOT NULL,
+  groups TEXT NOT NULL, recipients INTEGER NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  UNIQUE(tool_call_id, event));
 CREATE TABLE IF NOT EXISTS system_health(
   id INTEGER PRIMARY KEY, system_id INTEGER NOT NULL REFERENCES systems(id), workflow TEXT NOT NULL,
   req_kind TEXT NOT NULL, req_key TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL,

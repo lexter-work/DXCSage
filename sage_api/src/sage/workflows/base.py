@@ -29,6 +29,12 @@ class Workflow(ABC):
     tasks: ClassVar[tuple[type[Task], ...]] = ()
     extra_requirements: ClassVar[tuple[Requirement, ...]] = ()
     binding_settings: ClassVar[tuple[SettingSpec, ...]] = ()
+    result_states: ClassVar[tuple[str, ...]] = ()      # states of the result an email rule may react to (see result_state)
+
+    @classmethod
+    def result_state(cls, output) -> str | None:
+        """The state the result is in (one of result_states), or None. Lets a status workflow send mail on ERROR and so on."""
+        return None
 
     @classmethod
     def requirements(cls) -> list[Requirement]:

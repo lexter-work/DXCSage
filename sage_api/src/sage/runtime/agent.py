@@ -20,10 +20,10 @@ SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided 
 
 
 class AgentService:
-    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, clock=utcnow, poll_seconds=5):
+    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, clock=utcnow, poll_seconds=5):
         self._db, self._audit, self._settings, self._providers = db, audit, settings, providers
         self._workflows, self._setup, self._rfc, self._data_dir, self._usage = workflows, setup, rfc, data_dir, usage
-        self._clock, self._poll, self._ssh = clock, poll_seconds, ssh
+        self._clock, self._poll, self._ssh, self._email = clock, poll_seconds, ssh, email
         self._tasks: dict[int, asyncio.Task] = {}
         self._scheduler: asyncio.Task | None = None
 
@@ -173,6 +173,10 @@ class AgentService:
                 results.append(await self._execute(run_id, user, use, existing))
         return results
 
+    def _mail(self, workflow, event, call_id, run_id, system, actor, detail=""):
+        if self._email:
+            self._email.notify(workflow=workflow, event=event, tool_call_id=call_id, run_id=run_id, system=system, actor=actor, detail=detail)
+
     async def _execute(self, run_id, user, use, existing):
         name, actor = use["name"], user["username"]
         if existing:
@@ -183,7 +187,8 @@ class AgentService:
                 (run_id, use["id"], name, json.dumps(use["input"]), iso(self._clock())))
             await self._audit.write("tool.call", actor, run_id, {"workflow": name, "input": use["input"]})
             await self._emit(run_id, "tool_start", {"workflow": name, "input": use["input"]})
-        status, output = "ok", ""
+        status, output, label = "ok", "", ""
+        started = not existing
         try:
             cls = self._workflows.get(name)
             if cls is None:
@@ -193,6 +198,9 @@ class AgentService:
             if hasattr(data, "system_name"):
                 system, binding = await self._setup.authorize_run(name, data.system_name, actor)
                 await self._db.execute("UPDATE tool_calls SET system_id=? WHERE id=?", (system["id"], call_id))
+                label = system["label"]
+            if started:
+                self._mail(name, "started", call_id, run_id, label, actor)
             backoff = await self._settings.get("wait.backoff")
             max_wait = int(await self._settings.get("wait.max_wait"))
             task_ctx = TaskContext(system["id"] if system else None, self._rfc, self._settings, binding, self._data_dir,
@@ -209,13 +217,17 @@ class AgentService:
                                   is_cancelled=cancelled, emit=emit)
             out = await cls().run(ctx, data)
             output = out.model_dump_json()
+            if (state := cls.result_state(out)):
+                self._mail(name, f"result:{state}", call_id, run_id, label, actor, getattr(out, "message", ""))
         except WorkflowSuspended as s:
+            self._mail(name, "waiting", call_id, run_id, label, actor)
             await self._db.execute("UPDATE tool_calls SET status='waiting' WHERE id=?", (call_id,))
             await self._db.execute("UPDATE runs SET status='waiting', resume_at=? WHERE id=?", (iso(s.resume_at), run_id))
             await self._emit(run_id, "waiting", {"workflow": name, "resume_at": iso(s.resume_at)})
             raise
         except RunCancelled:
             await self._db.execute("UPDATE tool_calls SET status='cancelled', ended_at=? WHERE id=?", (iso(self._clock()), call_id))
+            self._mail(name, "cancelled", call_id, run_id, label, actor)
             raise
         except (WorkflowFailed, AccessError) as e:
             status, output = "error", str(e)
@@ -227,6 +239,7 @@ class AgentService:
         await self._db.execute("UPDATE tool_calls SET status=?, output=?, ended_at=? WHERE id=?",
                                (status, output, iso(self._clock()), call_id))
         await self._audit.write("tool.end", actor, run_id, {"workflow": name, "status": status})
+        self._mail(name, "completed" if status == "ok" else "failed", call_id, run_id, label, actor, output if status != "ok" else "")
         await self._emit(run_id, "tool_end", {"workflow": name, "status": status})
         return {"type": "tool_result", "tool_use_id": use["id"], "content": output, "is_error": status != "ok"}
 

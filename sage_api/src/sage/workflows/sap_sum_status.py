@@ -41,6 +41,11 @@ class SapSumStatus(Workflow):
                    "the system. Read-only: it never starts, stops or changes SUM.")
     Input, Output = SystemInput, SumOutput
     tasks = (PollSum,)
+    result_states = ("RUNNING", "WAITING_INPUT", "ERROR", "POSSIBLE_HANG", "PROCESS_DEAD", "COMPLETED", "OFFLINE", "UNKNOWN")
+
+    @classmethod
+    def result_state(cls, output):
+        return output.state
 
     async def run(self, ctx, data: SystemInput) -> SumOutput:
         p = await ctx.task(PollSum, PollIn())

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from sage.audit import AuditLog
 from sage.auth import AuthService
 from sage.db import Database
+from sage.emailer import EmailService, smtp_send
 from sage.health import HealthService
 from sage.providers.registry import default_providers
 from sage.sap.rfc import SapRfc, pyrfc_connector
@@ -20,7 +21,7 @@ from sage.workflow_setup import WorkflowSetupService
 from sage.workflows.registry import discover
 
 
-async def build_services(*, data_dir, key_dir, connector=None, providers=None, workflows=None, clock=None, ssh_connector=None, ssh_host_key=None):
+async def build_services(*, data_dir, key_dir, connector=None, providers=None, workflows=None, clock=None, ssh_connector=None, ssh_host_key=None, mail_sender=None):
     clock = clock or utcnow
     data_dir, key_dir = Path(data_dir), Path(key_dir)
     db = Database(data_dir / "sage.db")
@@ -45,8 +46,9 @@ async def build_services(*, data_dir, key_dir, connector=None, providers=None, w
     health = HealthService(db, audit, rfc, systems, settings, wf, clock, ssh)
     setup = WorkflowSetupService(db, audit, systems, health, wf, settings, clock)
     usage = UsageService(db, clock)
+    email = EmailService(db, settings, audit, wf, clock, mail_sender or smtp_send)
     agent = AgentService(db=db, audit=audit, settings=settings, providers=providers or default_providers(), workflows=wf,
-                         setup=setup, rfc=rfc, data_dir=data_dir, usage=usage, ssh=ssh, clock=clock)
-    return SimpleNamespace(usage=usage, agent=agent, manual_drive=os.getenv("SAGE_TEST_MANUAL_DRIVE") == "1", db=db, box=box, audit=audit, settings=settings, auth=auth, rfc=rfc, ssh=ssh, systems=systems,
+                         setup=setup, rfc=rfc, data_dir=data_dir, usage=usage, ssh=ssh, email=email, clock=clock)
+    return SimpleNamespace(usage=usage, agent=agent, manual_drive=os.getenv("SAGE_TEST_MANUAL_DRIVE") == "1", db=db, box=box, audit=audit, settings=settings, auth=auth, rfc=rfc, ssh=ssh, email=email, systems=systems,
                            data_dir=data_dir, clock=clock, connector=connector,
                            providers=providers, workflows=wf, health=health, setup=setup)

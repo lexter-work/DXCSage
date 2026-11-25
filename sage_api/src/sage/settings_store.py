@@ -3,7 +3,7 @@ import json
 
 from sage.util import iso
 
-SECRET_KEYS = {"providers.anthropic_api_key", "providers.openai_api_key"}
+SECRET_KEYS = {"providers.anthropic_api_key", "providers.openai_api_key", "email.smtp_password"}
 
 DEFAULTS: dict = {
     "agent.max_turns": 10,
@@ -21,6 +21,13 @@ DEFAULTS: dict = {
     "workflows.disabled": [],
     "addon.protected_components": ["SAP_BASIS", "SAP_ABA", "SAP_GWFND", "SAP_UI", "S4CORE", "S4COREOP", "S4DEPREC", "S4FND",
                                    "EA-DFPS", "EA-PS", "FI-CAX", "SAP_BW"],
+    "email.enabled": False,
+    "email.smtp_host": "",
+    "email.smtp_port": 587,
+    "email.security": "starttls",
+    "email.smtp_user": "",
+    "email.smtp_password": "",
+    "email.from_address": "",
     "rolechange.max_entries": 50,
     "rolechange.policy": {
         "max_changes_per_request": 50,
