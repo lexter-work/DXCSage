@@ -34,3 +34,6 @@ class Provider(ABC):
     @abstractmethod
     def stream(self, *, model: str, system: str, messages: list[dict], tools: list[ToolSpec],
                api_key: str, max_tokens: int) -> AsyncIterator: ...
+
+    @abstractmethod
+    async def list_models(self, api_key: str) -> list[str]: ...

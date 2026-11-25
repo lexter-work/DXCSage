@@ -21,3 +21,8 @@ class AnthropicProvider(Provider):
             if b.type == "tool_use":
                 yield ToolUse(id=b.id, name=b.name, input=dict(b.input))
         yield Done(final.usage.input_tokens, final.usage.output_tokens)
+
+    async def list_models(self, api_key: str) -> list[str]:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        page = await client.models.list()
+        return [m.id for m in page.data]

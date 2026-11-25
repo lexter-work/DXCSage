@@ -33,6 +33,24 @@ async def put_setting(body: SettingBody, request: Request, admin: dict = Depends
     return {"ok": True}
 
 
+@router.post("/settings/providers/sync-models")
+async def sync_models(request: Request, admin: dict = Depends(admin_user)):
+    svc = _svc(request)
+    key_setting = {"anthropic": "providers.anthropic_api_key", "openai": "providers.openai_api_key"}
+    models = dict(await svc.settings.get("providers.models"))
+    errors = {}
+    for name, provider in svc.providers.items():
+        api_key = await svc.settings.get(key_setting[name])
+        if not api_key:
+            continue
+        try:
+            models[name] = await provider.list_models(api_key)
+        except Exception as e:
+            errors[name] = str(e)
+    await svc.settings.set("providers.models", models, admin["username"])
+    return {"models": models, "errors": errors}
+
+
 @router.get("/usage")
 async def usage_all(request: Request, admin: dict = Depends(admin_user)):
     return await _svc(request).usage.all()

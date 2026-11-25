@@ -61,6 +61,9 @@ class Script(Provider):
         for ev in self.turns.pop(0):
             yield ev
 
+    async def list_models(self, api_key):
+        return []
+
 
 class Clock:
     def __init__(self):

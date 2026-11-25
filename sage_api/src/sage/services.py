@@ -53,8 +53,9 @@ async def build_services(*, data_dir, key_dir, connector=None, providers=None, w
     schedules = ScheduleService(db, audit, wf, systems, clock)
     uploads = UploadService(db, audit, data_dir, clock)
     policies = PolicyService(db, audit, clock)
-    agent = AgentService(db=db, audit=audit, settings=settings, providers=providers or default_providers(), workflows=wf,
+    provider_map = providers or default_providers()
+    agent = AgentService(db=db, audit=audit, settings=settings, providers=provider_map, workflows=wf,
                          setup=setup, rfc=rfc, data_dir=data_dir, usage=usage, ssh=ssh, email=email, schedules=schedules, uploads=uploads, policies=policies, clock=clock)
     return SimpleNamespace(usage=usage, agent=agent, manual_drive=os.getenv("SAGE_TEST_MANUAL_DRIVE") == "1", db=db, box=box, audit=audit, settings=settings, auth=auth, rfc=rfc, ssh=ssh, email=email, schedules=schedules, uploads=uploads, policies=policies, systems=systems,
                            data_dir=data_dir, clock=clock, connector=connector,
-                           providers=providers, workflows=wf, health=health, setup=setup)
+                           providers=provider_map, workflows=wf, health=health, setup=setup)

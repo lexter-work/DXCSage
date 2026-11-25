@@ -60,3 +60,8 @@ class OpenAIProvider(Provider):
         for use in accumulate_tool_calls(deltas):
             yield use
         yield Done(usage.prompt_tokens if usage else 0, usage.completion_tokens if usage else 0)
+
+    async def list_models(self, api_key: str) -> list[str]:
+        client = AsyncOpenAI(api_key=api_key)
+        page = await client.models.list()
+        return sorted(m.id for m in page.data if m.id.startswith("gpt"))

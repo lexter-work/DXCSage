@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { get, put } from '../../api'
+import { get, post, put } from '../../api'
 import Drawer from '../../components/Drawer.vue'
 import HelpBody from '../../components/HelpBody.vue'
 import HelpPopover from '../../components/HelpPopover.vue'
@@ -16,6 +16,13 @@ const grouped = computed(() => GROUPS.map(([label, prefixes]) => [label, Object.
 const missing = computed(() => [['providers.anthropic_api_key', 'Claude'], ['providers.openai_api_key', 'GPT']].filter(([k]) => raw.value[k] && !raw.value[k].set))
 const title = computed(() => !Object.keys(raw.value).length ? 'Settings' : missing.value.length === 2 ? 'Claude and GPT have no API key yet' : missing.value.length ? `${missing.value[0][1]} has no API key yet` : 'Settings')
 const load = async () => (raw.value = await get('api/settings'))
+async function syncModels() {
+  try {
+    const { errors } = await post('api/settings/providers/sync-models', {})
+    toast(Object.keys(errors).length ? `Synced, but: ${Object.values(errors).join('; ')}` : 'Model list synced')
+    await load()
+  } catch (e) { toast(e) }
+}
 function open(r: any) { sel.value = r.key; text.value = r.secret ? '' : JSON.stringify(raw.value[r.key], null, 2) }
 async function save() {
   const secret = isSecret(raw.value[sel.value!])
@@ -35,7 +42,7 @@ onMounted(load)
       <thead><tr><th style="width:280px">Setting</th><th>Value</th></tr></thead>
       <tbody>
         <template v-for="[label, list] in grouped" :key="label">
-          <tr class="grp"><td colspan="2">{{ label }}</td></tr>
+          <tr class="grp"><td colspan="2">{{ label }}<button v-if="label === 'Providers'" class="btn sm" style="float:right" @click.stop="syncModels">Sync models from API</button></td></tr>
           <tr v-for="r in list" :key="r.key" class="click" tabindex="0" @click="open(r)" @keydown.enter="open(r)">
             <td><span class="keycell"><span class="mono">{{ r.key }}</span><HelpPopover v-if="SETTINGS_HELP[r.key]" :title="r.key" :help="SETTINGS_HELP[r.key]" /></span></td>
             <td class="wrap" style="color:var(--ink)"><span v-if="r.secret" class="pill" :class="r.set ? 'ok' : 'warn'">{{ r.set ? 'Set' : 'Not set' }}</span><span v-else class="mono">{{ short(r.value) }}</span></td>
