@@ -51,8 +51,7 @@ class FakeRfcClient:
         if not where.strip():
             return True
 
-        def ok(cond):
-            m = re.fullmatch(r"(\w+) = '([^']*)'", cond.strip())
-            return bool(m) and str(row.get(m[1], "")).strip() == m[2]
-
-        return any(all(ok(c) for c in re.split(r"\s+AND\s+", part)) for part in re.split(r"\s+OR\s+", where.strip()))
+        # conditions "FIELD = 'value'" joined by AND / OR, with parentheses
+        expr = re.sub(r"(\w+) = '([^']*)'", lambda m: f"ok({m[1]!r}, {m[2]!r})", where)
+        expr = re.sub(r"\bAND\b", "and", re.sub(r"\bOR\b", "or", expr))
+        return bool(eval(expr, {"__builtins__": {}}, {"ok": lambda f, v: str(row.get(f, "")).strip() == v.strip()}))

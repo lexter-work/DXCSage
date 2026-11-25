@@ -19,6 +19,20 @@ DEFAULTS: dict = {
     "health.max_age": 86400,
     "sap.rowcount_cap": 5000,
     "workflows.disabled": [],
+    "sod.matrix": {
+        "matrix_version": "1.0.0",
+        "conflicts": [
+            {"id": "SOD-001", "object_1": "F_BKPF_BUK", "activity_1": "01,02", "object_2": "F_BKPF_BES",
+             "description": "Posting (create or change, not display) and payment approval", "risk_level": "HIGH",
+             "recommended_action": "Remove one of the conflicting objects or split into separate roles."},
+            {"id": "SOD-002", "object_1": "M_BEST_BSA", "object_2": "M_BEST_EKO",
+             "description": "Purchase order creation and approval", "risk_level": "CRITICAL",
+             "recommended_action": "Separate PO creation from PO approval."},
+            {"id": "SOD-006", "object_1": "S_DEVELOP", "object_2": "S_ADMI_FCD",
+             "description": "Development access combined with system administration", "risk_level": "CRITICAL",
+             "recommended_action": "Never combine development and system administration."},
+        ],
+    },
     "readiness.prerequisite_notes": {
         "download_wait_seconds": 600,
         "download_poll_seconds": 15,

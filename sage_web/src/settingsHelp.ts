@@ -68,6 +68,12 @@ export const SETTINGS_HELP: Record<string, SettingHelp> = {
     fallback: '[] (none disabled)',
     effect: 'The Workflows page changes this list when you disable or enable a workflow, so you rarely need to edit it here.',
   },
+  'sod.matrix': {
+    summary: 'The segregation-of-duties rules the user SoD check workflow compares the roles of a user against.',
+    format: 'JSON object with "conflicts", a list of rules. Each rule has "id", "object_1" and "object_2" (more sides as "object_3" and so on), "description", "risk_level" (CRITICAL, HIGH, MEDIUM or LOW) and "recommended_action". A side is an authorization object or a transaction code. Add "activity_1", "activity_2" (for example "01,02") to count a side only when the role grants one of those ACTVT codes. Names may use letters, digits and _ / . $ # @ -.',
+    fallback: 'Three rules: posting and payment approval (SOD-001), purchase order creation and approval (SOD-002), development and administration (SOD-006).',
+    effect: 'Read when a check starts. A rule fires when the user holds every side, even across different roles. A transaction code with a wildcard in a role is not matched.',
+  },
   'readiness.prerequisite_notes': {
     summary: 'The SAP Notes the Readiness Check workflow needs on a system before it starts the analysis job.',
     format: 'JSON object. "notes" lists the notes (number, optional remark, optional "conditional": true, which is reported but never blocks). "download_wait_seconds" and "download_poll_seconds" control waiting for missing notes. "require_implemented" blocks on notes that are downloaded but not implemented. "implementation_status" names the SAP table, field and values that mean implemented.',
