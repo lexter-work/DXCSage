@@ -111,6 +111,6 @@ class AuthService:
         user, pw = env.get("SAGE_BOOTSTRAP_ADMIN_USER"), env.get("SAGE_BOOTSTRAP_ADMIN_PASSWORD")
         if not user or not pw:
             return False
-        await self.create_user(user, pw, "admin", "bootstrap", must_change=True)
+        await self.create_user(user, pw, "admin", "bootstrap", must_change=False)
         await self._audit.write("auth.bootstrap", "bootstrap", detail={"username": user})
         return True

@@ -98,22 +98,30 @@ netstat -ano | findstr /R /C:":%~1 .*LISTENING" >nul
 exit /b %errorlevel%
 
 :loadenv
-rem Bootstrap admin only (see .env.example). Read from .env if it exists.
-if exist "%~dp0.env" (
-  for /f "usebackq eol=# tokens=1,* delims==" %%a in ("%~dp0.env") do set "%%a=%%b"
+rem See .env.example. Fails if .env is missing or any listed variable is blank.
+if not exist "%~dp0.env" (
+  echo .env not found. Copy .env.example to .env and fill it in.
+  exit /b 1
+)
+for /f "usebackq eol=# tokens=1,* delims==" %%a in ("%~dp0.env") do (
+  set "%%a=%%b"
+  if "%%b"=="" (
+    echo %%a is set in .env but has no value.
+    exit /b 1
+  )
 )
 exit /b 0
 
 :start_api
 call :isup %API_PORT% && ( echo API is already running on port %API_PORT%. & exit /b 0 )
 where uv >nul 2>&1 || ( echo uv is not installed or not on PATH. & exit /b 1 )
-call :loadenv
+call :loadenv || exit /b 1
 if not exist "%~dp0sage_api\.venv" (
   echo First run: installing API dependencies...
   pushd "%~dp0sage_api" & call uv sync & popd
 )
-start "DXC Sage API" /min /d "%~dp0sage_api" cmd /c uv run uvicorn sage.app:create_app --factory --host 127.0.0.1 --port %API_PORT%
-echo API starting on http://localhost:%API_PORT% (own window, minimized).
+start "" /b /d "%~dp0sage_api" cmd /c uv run uvicorn sage.app:create_app --factory --host 127.0.0.1 --port %API_PORT% >>"%~dp0sage_api\api.log" 2>&1
+echo API starting on http://localhost:%API_PORT% (log: sage_api\api.log).
 exit /b 0
 
 :start_web
@@ -123,8 +131,8 @@ if not exist "%~dp0sage_web\node_modules" (
   echo First run: installing web dependencies...
   pushd "%~dp0sage_web" & call pnpm install & popd
 )
-start "DXC Sage Web" /min /d "%~dp0sage_web" cmd /c pnpm dev
-echo Web starting on http://localhost:%WEB_PORT% (own window, minimized).
+start "" /b /d "%~dp0sage_web" cmd /c pnpm dev >>"%~dp0sage_web\web.log" 2>&1
+echo Web starting on http://localhost:%WEB_PORT% (log: sage_web\web.log).
 exit /b 0
 
 :stop_port

@@ -1,12 +1,10 @@
 from tests.conftest import login_admin
 
 
-async def test_bootstrap_admin_forces_password_change(client):
+async def test_bootstrap_admin_does_not_force_password_change(client):
     r = await client.post("/api/auth/login", json={"username": "admin", "password": "bootstrap-pass-1"})
     assert r.status_code == 200
-    assert (await client.get("/api/auth/me")).json()["must_change_password"] is True
-    assert (await client.get("/api/users")).status_code == 403          # blocked until changed
-    await client.post("/api/auth/change-password", json={"old": "bootstrap-pass-1", "new": "admin-pass-12345"})
+    assert (await client.get("/api/auth/me")).json()["must_change_password"] is False
     assert (await client.get("/api/users")).status_code == 200
 
 
