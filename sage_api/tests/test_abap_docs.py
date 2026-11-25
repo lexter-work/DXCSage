@@ -1,6 +1,7 @@
 import pytest
 
 from sage.abap_docs import CATALOG, _load
+from sage.workflows.sap_obsolete_tcodes import SapObsoleteTcodes
 from sage.workflows.sap_readiness_check import SapReadinessCheck
 from tests.test_health_setup import mk_system
 
@@ -11,7 +12,7 @@ def app_kwargs():
 
 
 def test_every_object_of_the_workflow_is_documented_and_every_part_file_exists():
-    assert {o for o, _ in SapReadinessCheck.abap_objects()} <= set(CATALOG)
+    assert {o for wf in (SapReadinessCheck, SapObsoleteTcodes) for o, _ in wf.abap_objects()} <= set(CATALOG)
     for doc in CATALOG.values():
         assert doc["flow"] and doc["create"]
         for part in doc["parts"]:

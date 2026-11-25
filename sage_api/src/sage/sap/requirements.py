@@ -141,6 +141,23 @@ class SettingPresent(Requirement):
         return CheckResult(status="pass") if val else CheckResult(status=self.level, message=f"setting '{self.key}' is not set")
 
 
+@dataclass(frozen=True)
+class DeclaredAuth(Requirement):
+    """Authorization values a workflow needs that no scan can see (for example a standard report checks them inside a
+    background job). Listed in the authorization table and compared by AuthCoverage; this requirement itself always passes."""
+    rows: tuple[tuple[str, str, str], ...] = ()
+    kind: ClassVar[str] = "auth_declared"
+
+    async def check(self, env):
+        return CheckResult(status="pass", message="Compared in the authorization check.")
+
+    def auth_rows(self, names=None):
+        return list(self.rows)
+
+    def title(self):
+        return f"Authorizations for {self.key}"
+
+
 SCAN_FM = "ZFM_AUTH_REQ_LIST"        # custom RFC that lists the authorization checks inside a function module (static scan)
 
 

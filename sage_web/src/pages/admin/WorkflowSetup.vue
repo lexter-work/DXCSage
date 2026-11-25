@@ -10,7 +10,7 @@ const { name, systemId } = useRoute().params as { name: string; systemId: string
 const base = `api/workflows/${name}/systems/${systemId}`
 const guide = ref<any | null>(null), wf = ref<any | null>(null), binding = ref<any | null>(null), values = ref<Record<string, string>>({})
 
-const GROUPS: [string, string[]][] = [['Connection', ['reachable', 'login']], ['Function modules', ['fm_exists', 'fm_authorized']], ['Tables', ['table_readable']], ['Authorizations', ['auth_coverage']], ['Settings', ['setting']]]
+const GROUPS: [string, string[]][] = [['Connection', ['reachable', 'login']], ['Function modules', ['fm_exists', 'fm_authorized']], ['Tables', ['table_readable']], ['Authorizations', ['auth_declared', 'auth_coverage']], ['Settings', ['setting']]]
 const grouped = computed(() => GROUPS.map(([label, kinds]) => [label, (guide.value?.steps ?? []).filter((s: any) => kinds.includes(s.kind))] as const).filter(([, l]) => l.length))
 const total = computed(() => guide.value?.steps.length ?? 0)
 const passed = computed(() => (guide.value?.steps ?? []).filter((s: any) => s.status === 'pass').length)

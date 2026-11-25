@@ -10,6 +10,7 @@ _DEFAULT_GUIDE = {
     "fm_authorized": "Add S_RFC to the RFC user's role so the function (or its group) may be called remotely with ACTVT 16.",
     "table_readable": "Add S_TABU_NAM (or S_TABU_DIS for the table's authorization group) with ACTVT 03 for the table.",
     "setting": "Fill in this value on the workflow setup page.",
+    "auth_declared": "These values are checked inside a standard SAP report, so no scan can find them. Ask the security team to add them to the RFC user's role.",
     "auth_coverage": "Compares every authorization value the workflow needs with the RFC user. Send the missing values to the security team in one request (see the table on this page).",
 }
 

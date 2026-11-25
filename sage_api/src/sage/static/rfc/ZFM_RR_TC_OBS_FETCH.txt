@@ -1,0 +1,276 @@
+ZFM_RR_TC_OBS_FETCH — custom RFC wrapper for reading a finished PROFGEN_CORR_REPORT_2 job's spool, without XBP
+====================================================================================================================
+
+WHY THIS EXISTS
+----------------
+Once ZFM_RR_TC_OBS_START's job finishes (poll via the shared
+ZFM_CHECK_JOB_STATUS), the SU25 2D result only exists as a spool list -
+PROFGEN_CORR_REPORT_2 has no GUI_DOWNLOAD-style archive to intercept the
+way sap_readiness_check's ZFM_RC_FETCH_ANALYSIS does; the output is an
+ALV list sent to spool via the output device given at JOB_SUBMIT/
+JOB_CLOSE time.
+
+The standard way to read spool content back programmatically is the XBP
+interface (BAPI_XBP_SPOOL_READ_LIST etc.), which needs BAPI_XMI_LOGON
+and TXMILOGON whitelisting - not available here (no XBP account). Same
+"skip the blocked hop" shape as every other custom RFC in this
+capability: wrap the actual spool read (RSPO_RETURN_ABAP_SPOOLJOB, a
+plain function module, not part of the XBP interface) in a
+remote-enabled function module instead.
+
+
+WHAT'S CONFIRMED vs. STILL OPEN — read this before anything else
+--------------------------------------------------------------------
+CONFIRMED (TS3, 2026-09-22):
+  - A background run of PROFGEN_CORR_REPORT_2 produces a real spool
+    request (spool no. 629452 in the confirming run, 116 pages, 6,855
+    records) whose "Graphical display of spool request" content in SAP
+    GUI matches the interactive screen's grid exactly - same columns,
+    same rows, same "Old entry will be deleted" markers.
+  - RSPO_RETURN_ABAP_SPOOLJOB's real EXCEPTIONS list is no_such_job,
+    not_abap_list, job_contains_no_data, selection_empty, no_permission,
+    can_not_access, read_error - seven, not eight; type_no_match (this
+    file's earlier guess) does not exist on this FM and has been
+    removed from STEP 3.
+  - RSPO_RETURN_ABAP_SPOOLJOB's RQIDENT import is typed TSP01-RQIDENT
+    (domain RSPOID, numeric). A first activation attempt on TS3
+    (2026-09-22) passed TBTCP-LISTIDENT (CHAR(20)) straight through and
+    dumped CX_SY_DYN_CALL_ILLEGAL_TYPE / CALL_FUNCTION_CONFLICT_TYPE.
+    STEP 3 now converts explicitly (lv_rqident TYPE tsp01-rqident)
+    before the call.
+  - RSPO_RETURN_ABAP_SPOOLJOB's TABLES parameter is BUFFER, not
+    LISTOBJECT - CONFIRMED by a real dump on TS3 (2026-09-22,
+    CX_SY_DYN_CALL_PARAM_MISSING: "the required parameter BUFFER was
+    not filled") after the RQIDENT fix above cleared the first dump.
+    An earlier revision of this file asserted LISTOBJECT was the
+    confirmed real parameter name (based on an AI session's unverified,
+    pre-dump signature check) and walked back the correct BUFFER
+    answer from an even earlier turn - that walk-back was wrong. BUFFER
+    already returns flattened text lines directly, so passing
+    LISTOBJECT and running a second LIST_TO_ASCI conversion (this
+    file's earlier two-step design) was unnecessary complexity on top
+    of being the wrong parameter name. STEP 3 now calls BUFFER =
+    LISTLINES directly - one call, no LIST_TO_ASCI, no ABAPLIST-typed
+    intermediate table.
+  - RSPO_R_RDI_GET_SPOOL_JOB_ITEM and EPS_GET_SPOOL_LIST (this file's
+    earlier suggested fallbacks) are CONFIRMED NOT TO EXIST on TS3 -
+    don't try them. RSPO_R_RETURN_RAW_DATA does exist and is
+    remote-enabled, but takes no spool-ID import at all - it looks
+    built to run against a spool job already selected by some other
+    RFC/session mechanism, not a standalone "read spool N" call. Not
+    pursued further; RSPO_RETURN_ABAP_SPOOLJOB with the RQIDENT fix
+    above is the current path.
+
+  - TBTCP-LISTIDENT is populated and correctly keyed for this report's
+    job: the STEP 4 test run (2026-09-22, JOBNAME=ZZZTEST_RR2) derived
+    SPOOLNUM 629858 from it, matching the job's real spool. The job has
+    one step, so STEP A's stepcount = 1 read is enough.
+
+NOT CONFIRMED: nothing blocking. If a future release leaves
+TBTCP-LISTIDENT empty, fall back to a caller-supplied SPOOLNUM import
+(found via SP01) instead of deriving it.
+
+
+STEP 1 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH - all mcp_architecture_PH custom RFC function
+modules share this one group, regardless of which capability they
+belong to.
+
+
+STEP 2 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_RR_TC_OBS_FETCH
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Read a finished PROFGEN_CORR_REPORT_2 job's spool content (NO XBP)
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name   Type spec        Pass Value  Optional  Default
+    --------------   ---------        ----------  --------  -------
+    JOBNAME           TYPE BTCJOB      CHECKED     no        -
+    JOBCOUNT          TYPE BTCJOBCNT   CHECKED     no        -
+
+  Export tab:
+    Parameter name    Typing   Associated Type   Pass Value  Optional
+    ---------------   ------   ---------------   ----------  --------
+    SPOOLNUM            TYPE     TSP01-RQIDENT     CHECKED     yes
+
+  Tables tab:
+    Parameter name    Typing   Associated Type
+    ---------------   ------   ---------------
+    LISTLINES          TYPE     SOLI_TAB
+
+    STRINGTAB (table of the built-in STRING type) is NOT valid here -
+    confirmed on TS3 (2026-09-22): SE37 rejected it with "Only tables
+    with flat line structure are allowed in RFC" - STRING is a deep
+    type.
+
+    A local TYPES structure in the function group's TOP include is ALSO
+    not valid here - confirmed on TS3 (2026-09-22): SE37's Tables tab
+    rejected a program-local type with "Type ... does not exist", even
+    after activating the include and restarting SE37. Interface
+    parameter types (Import/Export/Tables/Changing) can only be DDIC
+    types (SE11), never a program-local TYPES declaration.
+
+    A hand-built custom structure/table type (SE11) was the next attempt
+    but hit a second, unrelated wall: TTYP (table type) activation needs
+    S_DEVELOP authorization this user doesn't have, even though creating
+    and saving the objects worked.
+
+    Fix that clears both problems at once: SOLI/SOLI_TAB are SAP-
+    standard, already-active DDIC objects - confirmed on TS3
+    (2026-09-22, via an AI session with system search access): SOLI is
+    package SO, one field LINE TYPE SO_TEXT255 (a CHAR(255) data
+    element); SOLI_TAB is TYPE STANDARD TABLE OF SOLI. No SE11 object to
+    create, no activation authorization needed - just reference
+    SOLI_TAB directly as LISTLINES's Associated Type. It's SAPoffice's
+    classic generic flat-text-line table type, already used the same way
+    by other RFC-facing APIs for exactly this line-oriented-text-over-
+    RFC problem.
+
+    255 chars (matching SOLI's own field width) was chosen over the
+    narrower SAP-standard TLINE (char 132) because the confirmed spool's
+    print format was X_65_512/2 ("512 Columns") - wider than TLINE's 132
+    would truncate. STEP 3 now feeds RSPO_RETURN_ABAP_SPOOLJOB's BUFFER
+    parameter directly into LISTLINES (no LIST_TO_ASCI conversion step
+    anymore - see STEP 3's note), so BUFFER's own internal line width is
+    what actually governs whether the 512-column content survives -
+    unconfirmed, check actual line length in STEP 4's test.
+
+  Exceptions tab:
+    JOB_NOT_FOUND
+    NO_SPOOL_FOUND
+    SPOOL_READ_FAILED
+
+
+STEP 3 — Source code
+------------------------
+Paste into the Source Code tab, below the FUNCTION/ENDFUNCTION frame
+SE37 already generated for you. Verified on TS3 (see STEP 4); re-test
+on each new target system.
+
+--------------------------------------------------------------------
+  DATA: lv_listident  TYPE tbtcp-listident,
+        lv_rqident    TYPE tsp01-rqident.
+
+* --- STEP A: find the spool request this job's step created.
+*     TBTCP is a plain table read, no XBP needed. If this comes back
+*     empty on your system, this function module's interface needs to
+*     change to accept SPOOLNUM as a caller-supplied import instead. ---
+  SELECT SINGLE listident FROM tbtcp
+    INTO lv_listident
+    WHERE jobname  = jobname
+      AND jobcount = jobcount
+      AND stepcount = 1.
+  IF sy-subrc <> 0 OR lv_listident IS INITIAL.
+    RAISE job_not_found.
+  ENDIF.
+
+  spoolnum = lv_listident.
+
+* --- CONFIRMED bug on TS3 (2026-09-22, real dump text): RQIDENT is
+*     typed TSP01-RQIDENT, domain RSPOID - a numeric 4-byte type, not
+*     TBTCP-LISTIDENT's CHAR(20). Passing lv_listident straight into
+*     RQIDENT raised CX_SY_DYN_CALL_ILLEGAL_TYPE / CALL_FUNCTION_
+*     CONFLICT_TYPE (dump quoted "Technical type of the formal
+*     parameter: I" vs. "actual parameter: TBTCP-LISTIDENT"). Explicit
+*     conversion required before the call. ---
+  lv_rqident = lv_listident.
+
+* --- STEP B: read the spool content. RSPO_RETURN_ABAP_SPOOLJOB is a
+*     plain function module (not XBP). CONFIRMED bug on TS3
+*     (2026-09-22, real dump text): BUFFER is a MANDATORY TABLES
+*     parameter on this FM (dump: CX_SY_DYN_CALL_PARAM_MISSING,
+*     "the required parameter BUFFER was not filled") - not optional,
+*     and separate from LISTOBJECT. BUFFER already returns the spool's
+*     flattened text lines directly, so LISTOBJECT and a second
+*     LIST_TO_ASCI conversion step (this file's earlier design) are
+*     unnecessary - feed BUFFER straight into LISTLINES (already
+*     SOLI-typed, 255 chars, matching BUFFER's expected line shape).
+*     RSPO_R_RDI_GET_SPOOL_JOB_ITEM and EPS_GET_SPOOL_LIST (this file's
+*     earlier suggested alternates) are CONFIRMED NOT TO EXIST on TS3 -
+*     don't try them. If RSPO_RETURN_ABAP_SPOOLJOB itself doesn't pan
+*     out, RSPO_R_RETURN_RAW_DATA is a real, remote-enabled candidate
+*     confirmed to exist on TS3, but it takes no RQIDENT/spool-ID
+*     import at all - it looks like it expects to run against a spool
+*     job already selected via some other RFC/session mechanism, not a
+*     standalone "read spool N" call like this wrapper needs. Treat it
+*     as an unverified, bigger redesign, not a drop-in swap, if it ever
+*     comes to that. ---
+  CALL FUNCTION 'RSPO_RETURN_ABAP_SPOOLJOB'
+    EXPORTING
+      rqident              = lv_rqident
+    TABLES
+      buffer               = listlines
+    EXCEPTIONS
+      no_such_job           = 1
+      not_abap_list          = 2
+      job_contains_no_data  = 3
+      selection_empty       = 4
+      no_permission         = 5
+      can_not_access        = 6
+      read_error             = 7
+      OTHERS                  = 8.
+  IF sy-subrc <> 0.
+    RAISE spool_read_failed.
+  ENDIF.
+
+  IF listlines[] IS INITIAL.
+    RAISE no_spool_found.
+  ENDIF.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module.
+
+
+STEP 4 — Test in SE37 before pointing the MCP capability at it
+------------------------------------------------------------------
+CONFIRMED PASSING on TS3 (2026-09-22): called via SE37's test screen
+(F8) with JOBNAME=ZZZTEST_RR2, JOBCOUNT=12082900 (the manually-scheduled
+test job) - no dump, SPOOLNUM 629858 (matches TBTCP-LISTIDENT for that
+job, so STEP A's derivation works), LISTLINES came back 7,329 entries.
+Opened LISTLINES in the Structure Editor result screen: same columns,
+same data as the "Graphical display of spool request" GUI screen for
+the earlier manual run (629452) - /ISDFPS/ROLE_GEN_TESTER,
+/MVA/A_MOTOR, same Node IDs, same "Old entry will be deleted" markers.
+Both open questions from earlier revisions of this file are resolved:
+RSPO_RETURN_ABAP_SPOOLJOB works via BUFFER, and TBTCP-LISTIDENT is
+populated and correctly keyed for this report's job. Ready to wire
+domain.py's detect_obsolete_tcodes / the watcher's on_completed() to
+call this for real.
+
+
+STEP 5 — Parsing LISTLINES into remove_tcode entries (Python side)
+----------------------------------------------------------------------
+CONFIRMED (TS3, 2026-09-22, raw LINE content pulled via SE37 debugger
+variable inspection - the Structure Editor result screen and any
+"export to Excel"/"Local File" path both re-render the field into
+columns and hide this): each LINE value is PIPE-DELIMITED, fixed-width
+padded within each field. Sample raw value:
+
+  |        |/ISDFPS/ROLE_GEN_TESTER       |                            |
+   3|Transaction                        |/ISDFPS/ROLE_GEN    |Old entry
+   will be deleted|     |       X      |      |        |
+
+Splitting on '|' and stripping each segment (drop the empty first/last
+segments from the leading/trailing pipe) gives, in order: Status, Role,
+Short Role Description, Node ID, Old Transaction (literal label
+"Transaction"), Old Transaction (the actual tcode), Automatic Adjustment
+("Old entry will be deleted" for a confirmed-obsolete row), Info, Does
+not exist (X/blank), Locked (X/blank), Obsolete (X/blank). SU22 Status
+Old Transaction and New Transaction (seen as trailing grid columns in
+the GUI/xlsx views) did not appear populated in this sample row - a row
+with a populated New Transaction (a role where SAP found an actual
+successor tcode, not just deletion) hasn't been captured yet; confirm
+the pipe count/field order still holds for that case before the parser
+assumes a fixed number of '|'-separated fields per line.
+
+A row becomes a remove_tcode entry (same shape _parse_tcode_check_rows
+already produces, reusing TCODE_AUTH_OBJECTS) when Automatic Adjustment
+indicates removal - i.e. `line.split('|')`, strip each part, map by the
+order above, filter on the Automatic Adjustment field.

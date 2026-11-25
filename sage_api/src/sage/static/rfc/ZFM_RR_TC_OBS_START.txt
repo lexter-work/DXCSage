@@ -1,0 +1,259 @@
+ZFM_RR_TC_OBS_START — custom RFC wrapper for scheduling PROFGEN_CORR_REPORT_2 without XBP
+================================================================================================
+
+WHY THIS EXISTS
+----------------
+detect_obsolete_tcodes needs to run SU25 Step 2D ("Editing of Obsolete
+Transactions in Role Menus") in background so the MCP server can poll it
+and build a remediation session from the result, instead of a human
+running it interactively in SAP GUI every time.
+
+The report behind that step is PROFGEN_CORR_REPORT_2 - confirmed live on
+TS3 (2026-09-22): running it via SE38 -> Execute in Background produced a
+real finished job and a 116-page, 6,855-record spool list identical in
+content to the interactive screen. So this is NOT an interactive-only
+report; scheduling it in background is viable.
+
+Same blocker as sap_readiness_check's ZFM_RC_START_ANALYSIS.txt:
+JOB_OPEN/JOB_SUBMIT/JOB_CLOSE are not remote-enabled function modules
+(CALL_FUNCTION_NOT_REMOTE), and this capability's XBP account isn't
+available either (BAPI_XMI_LOGON path was ruled out for that reason, not
+just as a design preference). Same fix: a thin remote-enabled wrapper
+that does JOB_OPEN/JOB_SUBMIT/JOB_CLOSE as ordinary internal ABAP calls
+against a hardcoded program name.
+
+
+WHAT'S CONFIRMED vs. STILL OPEN
+--------------------------------
+CONFIRMED (TS3, 2026-09-22, manual SE38 background test):
+  - PROFGEN_CORR_REPORT_2 runs to completion in background with no
+    selection-screen values at all (blank Roles = all roles), producing
+    a spool list with the same columns as the interactive ALV (Role,
+    Short Role Description, Node ID, Old Transaction x2, Automatic
+    Adjustment, Info, Does not exist, Locked, Obsolete, SU22 Status Old
+    Transaction, New Transaction).
+  - Output device LP01 (a sample device already configured on TS3) is
+    enough to let the job finish and produce spool - nothing is actually
+    printed.
+
+CONFIRMED BUG, ROOT CAUSE FOUND (TS3, 2026-09-22, real end-to-end run via
+tool_sapRR_detectObsoleteTcodes): a job scheduled by this wrapper
+finished in 11 seconds and produced NO spool at all (confirmed via SP01
+- "no list exist" for that job). The job log (SM37) shows the actual
+cause: "You are not authorized to use transaction PFCG" (message
+class 00... actually S#, number 077), immediately followed by "Job
+finished" - PROFGEN_CORR_REPORT_2 is SU25's own tooling and checks PFCG
+authorization internally; the RFC service user (TS3RFC) doesn't have
+it, so the report aborts before producing any list, and JOB_CLOSE still
+reports the job as finished since that informational abort isn't a hard
+job failure. This is NOT a missing-print-parameters problem - the
+manual SE38 test worked under an interactive user who already has PFCG
+access, which is exactly what masked this.
+
+CONFIRMED exact missing authorizations (full SU53 trace, 2026-09-22) -
+THREE failed checks, not one:
+  1. S_USER_AGR (ACTVT, ACT_GROUP) - "No authorization in user master
+     record" - during the background job itself (PROFGEN_CORR_REPORT_2's
+     own internal check). TS3RFC has no S_USER_AGR entry at all. This is
+     the one that actually aborted the report - the root cause above.
+  2. S_BTCH_ADM (BTCADMIN=Y) - "Authorization check not successful" -
+     TWICE, at 14:18:37.993 and .998, both tagged "RFC Function Module
+     ZFM_RR_TC_OBS_START" right before the job started (14:18:38.221) -
+     i.e. inside JOB_OPEN and/or JOB_CLOSE's own internal checks, not
+     anything this wrapper's own AUTHORITY-CHECK does. The job still
+     started and finished despite these failing, so they did not block
+     scheduling here - but grant this too, since a batch-admin check
+     failing quietly now could block a different job-admin operation
+     later (e.g. PRI_PARAMS changes via JOB_SUBMIT).
+
+FIX: request Basis add to TS3RFC's role:
+  - S_USER_AGR: ACTVT=03 (Display - this scan only reads roles, no
+    change/create needed), ACT_GROUP=* (or scoped to the role
+    namespaces that should be scanned, e.g. Z*).
+  - S_BTCH_ADM: BTCADMIN=Y.
+Then retest before assuming anything else is wrong. Print parameters
+(LP01, used in the manual test) may still be needed once this is fixed
+- not yet provable, since no run has gotten past the
+authorization check to test that separately.
+
+NOT CONFIRMED:
+  - Whether JOB_SUBMIT also needs PRI_PARAMS (built via
+    GET_PRINT_PARAMETERS, device LP01) once the PFCG authorization above
+    is fixed - the manual SE38 test that worked also had an interactive
+    output-device prompt this RFC path never gets. Test again once
+    authorization is fixed before assuming this is also needed.
+  - The exact selection-screen field names for a *scoped* run (specific
+    roles instead of all). Same lesson as ZFM_RC_START_ANALYSIS.txt: use
+    a VARIANT instead of guessing SELECT-OPTIONS names. Create a variant
+    on PROFGEN_CORR_REPORT_2 (SE38 -> report -> Goto -> Variants) once a
+    role-scoped run is actually needed; blank VARIANT runs with the
+    report's own defaults (i.e. all roles, as already proven above).
+  - Whether the dedicated RFC service user (not whoever ran the manual
+    SE38 test) has S_BTCH_JOB / JOBACTION=RELE - same failure mode
+    ZFM_RC_START_ANALYSIS.txt hit on TS3 for its own RFC user. Check this
+    on the RFC user specifically before assuming the wrapper itself is
+    broken if NO_AUTHORIZATION comes back. (Ruled out as the cause of
+    the no-spool bug above - the job scheduled and finished fine, it
+    just had no output device.)
+
+
+STEP 1 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH - all mcp_architecture_PH custom RFC function
+modules share this one group, regardless of which capability they
+belong to.
+
+
+STEP 2 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_RR_TC_OBS_START
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Schedule PROFGEN_CORR_REPORT_2 (SU25 2D) as an immediate background job (NO XBP)
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name   Type spec        Pass Value  Optional  Default
+    --------------   ---------        ----------  --------  -------
+    JOBNAME           TYPE BTCJOB      CHECKED     no        -
+    VARIANT             TYPE RALDB-VARIANT  CHECKED yes       ' '
+
+    VARIANT is optional here (unlike ZFM_RC_START_ANALYSIS's mandatory
+    one) because PROFGEN_CORR_REPORT_2 is confirmed to run correctly
+    with a blank selection screen - see "CONFIRMED" above. There is no
+    PROGRAM or ROLE parameter - the report is fixed in STEP 3's source;
+    widening this to accept a role range needs a real VARIANT tested
+    first (see "NOT CONFIRMED" above), not a guessed SELECT-OPTIONS name.
+
+  Export tab:
+    Parameter name    Typing   Associated Type   Pass Value  Optional
+    ---------------   ------   ---------------   ----------  --------
+    REAL_JOBNAME       TYPE     BTCJOB             CHECKED     yes
+    JOBCOUNT             TYPE     BTCJOBCNT          CHECKED     yes
+
+  Exceptions tab:
+    JOB_OPEN_FAILED
+    JOB_SUBMIT_FAILED
+    JOB_CLOSE_FAILED
+    NO_AUTHORIZATION
+
+  NOTE - Pass Value MUST be checked on every parameter, same reasoning
+  ZFM_RR_ROLE_AUTH_CHANGE.txt's STEP 3 note gives: RFC has no way to pass
+  a reference across a network boundary.
+
+
+STEP 3 — Source code
+------------------------
+Paste into the Source Code tab, below the FUNCTION/ENDFUNCTION frame
+SE37 already generated for you.
+
+--------------------------------------------------------------------
+  DATA: lv_jobname  TYPE btcjob,
+        lv_jobcount TYPE btcjobcnt.
+
+  CONSTANTS: lc_program TYPE sy-repid VALUE 'PROFGEN_CORR_REPORT_2'.
+
+  lv_jobname = jobname.
+
+* --- authorization check: caller must be allowed to schedule
+*     background jobs. Same object ZFM_RC_START_ANALYSIS uses.
+  AUTHORITY-CHECK OBJECT 'S_BTCH_JOB'
+    ID 'JOBACTION' FIELD 'RELE'
+    ID 'JOBGROUP'  DUMMY.
+  IF sy-subrc <> 0.
+    RAISE no_authorization.
+  ENDIF.
+
+* --- open the job. LOCAL call - see WHY THIS EXISTS above. ---
+  CALL FUNCTION 'JOB_OPEN'
+    EXPORTING
+      jobname              = lv_jobname
+    IMPORTING
+      jobcount             = lv_jobcount
+    EXCEPTIONS
+      cant_create_job      = 1
+      invalid_job_data     = 2
+      job_create_canceled  = 3
+      OTHERS               = 4.
+  IF sy-subrc <> 0.
+    RAISE job_open_failed.
+  ENDIF.
+
+* --- submit the report as the job's one step. VARIANT blank runs the
+*     report's own defaults - confirmed to mean "all roles" for
+*     PROFGEN_CORR_REPORT_2 specifically (see CONFIRMED above). REPORT
+*     is fixed to lc_program - there is no caller-supplied program name
+*     on this wrapper's interface at all. ---
+  CALL FUNCTION 'JOB_SUBMIT'
+    EXPORTING
+      authcknam                       = sy-uname
+      jobcount                        = lv_jobcount
+      jobname                         = lv_jobname
+      report                          = lc_program
+      variant                         = variant
+    EXCEPTIONS
+      bad_priparams                   = 1
+      bad_xpgflags                    = 2
+      invalid_jobdata                 = 3
+      jobname_missing                 = 4
+      job_notex                       = 5
+      job_submit_active                = 6
+      lock_failed                     = 7
+      program_missing                 = 8
+      prog_abap_and_variant_specified = 9
+      OTHERS                          = 10.
+  IF sy-subrc <> 0.
+    RAISE job_submit_failed.
+  ENDIF.
+
+* --- release the job to start immediately. ---
+  CALL FUNCTION 'JOB_CLOSE'
+    EXPORTING
+      jobcount              = lv_jobcount
+      jobname                = lv_jobname
+      strtimmed              = 'X'
+    EXCEPTIONS
+      cant_start_immediate  = 1
+      deadline_not_allowed  = 2
+      invalid_startdate     = 3
+      jobname_missing       = 4
+      job_close_failed      = 5
+      job_nosteps           = 6
+      job_notex              = 7
+      lock_failed            = 8
+      OTHERS                  = 9.
+  IF sy-subrc <> 0.
+    RAISE job_close_failed.
+  ENDIF.
+
+  real_jobname = lv_jobname.
+  jobcount     = lv_jobcount.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module.
+
+
+STEP 4 — Test in SE37 before pointing the MCP capability at it
+------------------------------------------------------------------
+  1. Call ZFM_RR_TC_OBS_START via SE37's test screen (F8) with no
+     VARIANT. Confirm in SM37 that a job appears and finishes, and that
+     its spool list matches the manually-verified 116-page/6,855-record
+     output from 2026-09-22.
+  2. Only then point the RFC user in config_sap_systems.json's `rfc`
+     block at a system where this has been verified, and call the new
+     tool for real. If NO_AUTHORIZATION comes back even though step 1
+     worked under an interactive user, check S_BTCH_JOB/JOBACTION=RELE
+     on the dedicated RFC service user specifically - see "NOT
+     CONFIRMED" above and ZFM_RC_START_ANALYSIS.txt's identical incident
+     on TS3.
+
+
+STEP 5 — Job status polling
+------------------------------
+No new function module needed. ZFM_CHECK_JOB_STATUS (src/static/rfc/,
+shared across capabilities) already takes JOBNAME/JOBCOUNT and returns
+TBTCO status - reuse it directly for the watcher's poll() the same way
+sap_readiness_check's ReadinessCheckWatcher does.
