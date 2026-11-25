@@ -22,6 +22,15 @@ DEFAULTS: dict = {
     "addon.protected_components": ["SAP_BASIS", "SAP_ABA", "SAP_GWFND", "SAP_UI", "S4CORE", "S4COREOP", "S4DEPREC", "S4FND",
                                    "EA-DFPS", "EA-PS", "FI-CAX", "SAP_BW"],
     "rolechange.max_entries": 50,
+    "rolechange.policy": {
+        "max_changes_per_request": 50,
+        "allowed_activity_levels": ["01", "02", "03", "06", "16", "70"],
+        "restricted_objects": [
+            {"object": "S_DEVELOP", "reason": "Development access requires Security team approval."},
+            {"object": "S_ADMI_FCD", "reason": "System administration functions require CISO approval."},
+            {"object": "S_USER_GRP", "reason": "User master maintenance requires Security team approval."},
+        ],
+    },
     "sod.matrix": {
         "matrix_version": "1.0.0",
         "conflicts": [

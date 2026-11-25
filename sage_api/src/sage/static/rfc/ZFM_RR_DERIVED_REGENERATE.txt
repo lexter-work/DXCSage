@@ -1,0 +1,80 @@
+*&---------------------------------------------------------------------*
+*& ZFM_RR_DERIVED_REGENERATE - derived-role regeneration (FM 3)
+*&---------------------------------------------------------------------*
+*& Contains : STEP 3 function module ZFM_RR_DERIVED_REGENERATE
+*& Needs    : STEPS 1-2 in ZFM_RR_LOCAL_CLASSES.txt (local class lcl_rr_derived_regen)
+*& Status   : FINAL source. Class activated in the verification sandbox;
+*&            function module not yet verified - verify on TS3.
+*& Engine   : standard FM PRGN_RFC_CREATE_DERIVATION, once per derived role
+*&            (adjust_auths = 'X', profile_gen = 'X', no_dialog = 'X').
+*&            Same as PFCG -> Authorizations -> Adjust derived -> Generate.
+*&
+*& INSTALL ORDER (same in all three files - do the steps in this order):
+*&   Before step 1 (nothing to paste): work in the Z package that already holds function
+*&   group ZFG_MCPARCHPH (not $TMP), so every object lands on one transport. The function
+*&   group is shared by all custom FMs and already exists - do NOT create it.
+*&   There are NO global classes: all logic sits in local classes of the function group.
+*&   1. Include LZFG_MCPARCHPHRRC in ZFG_MCPARCHPH (local classes)     in ZFM_RR_LOCAL_CLASSES.txt
+*&   2. One INCLUDE line in the top include LZFG_MCPARCHPHTOP          in ZFM_RR_LOCAL_CLASSES.txt
+*&   3. FM ZFM_RR_DERIVED_REGENERATE                                   in ZFM_RR_DERIVED_REGENERATE.txt  <== THIS FILE
+*&   4. FM ZFM_RR_TCODE_REMOVE                                         in ZFM_RR_TCODE_REMOVE.txt
+*&   Activate the function group after steps 1-2 (a syntax error in the include shows up
+*&   there), then create each FM. Each step sits between a >>> BEGIN and <<< END marker
+*&   in the file named above. Copy ONLY the code between the markers - never the markers
+*&   or this header.
+*&
+*& Verify on TS3 before the first real run:
+*&   - SE37 PRGN_RFC_CREATE_DERIVATION -> Attributes: released? RFC-enabled?
+*&   - SCC4 client 810: automatic recording? If yes, set
+*&     role_remediation.transport_request in the role-remediation config (sent as IV_REQUEST)
+*&   - RFC user: S_USER_AGR ACTVT 02 on parent + all derived roles,
+*&     and S_USER_PRO (profile generation)
+*&   - Test run first: IV_TEST_RUN = 'X' (lists children, changes nothing)
+*&---------------------------------------------------------------------*
+
+
+*======================================================================*
+* >>> BEGIN STEP 3 of 4: Function module ZFM_RR_DERIVED_REGENERATE
+*     1. SE37 -> create ZFM_RR_DERIVED_REGENERATE in function group ZFG_MCPARCHPH
+*     2. Attributes tab: Remote-Enabled Module
+*     3. Import/Export tabs: enter the parameters from the *"Local Interface
+*        block below, all with Pass Value ticked (required for RFC)
+*     4. Source code tab: paste FUNCTION ... ENDFUNCTION., then activate
+*        (SE37 regenerates the *"Local Interface comment block itself)
+*     Copy from the line below this box down to the <<< END marker.
+*======================================================================*
+FUNCTION zfm_rr_derived_regenerate.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_ROLE_NAME) TYPE  AGR_NAME
+*"     VALUE(IV_TEST_RUN) TYPE  CHAR1 DEFAULT SPACE
+*"     VALUE(IV_REQUEST) TYPE  TRKORR OPTIONAL
+*"  EXPORTING
+*"     VALUE(EV_RETURN_TYPE) TYPE  BAPI_MTYPE
+*"     VALUE(EV_RETURN_MSG) TYPE  BAPI_MSG
+*"     VALUE(EV_TRANSPORT) TYPE  TRKORR
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+  " Parameter names are fixed by executor.py, so they keep the IV_/EV_ prefixes.
+  " No classic exceptions: pyrfc would turn them into one error for the whole call.
+  " All authorization checks (parent and derived roles, activity 02) run in the class.
+  DATA(regeneration) = NEW lcl_rr_derived_regen( ).
+  DATA(parent_role) = CONV agr_name( to_upper( condense( iv_role_name ) ) ).
+
+  " An empty IV_REQUEST reaches PRGN_RFC_CREATE_DERIVATION unchanged; if SAP needs one, it rejects
+  " the child in RETURN and the class reports E - never a silent success
+  DATA(result) = COND lcl_rr_derived_regen=>regeneration_result(
+                   WHEN iv_test_run = abap_true
+                   THEN regeneration->simulate( parent_role )
+                   ELSE regeneration->regenerate( parent_role       = parent_role
+                                                  transport_request = iv_request ) ).
+
+  ev_return_type = result-return_type.
+  ev_return_msg  = result-message.
+  ev_transport   = result-transport.
+  et_return      = result-messages.
+ENDFUNCTION.
+*======================================================================*
+* <<< END STEP 3 of 4: Function module ZFM_RR_DERIVED_REGENERATE   (last line above: ENDFUNCTION.)
+*======================================================================*

@@ -1,0 +1,486 @@
+ZFM_RR_ROLE_AUTH_CHANGE — custom RFC function module for tool_sapRR_executeAuthorizationChanges
+=============================================================================================
+
+WHY THIS EXISTS
+----------------
+domain.py's execute_authorization_changes() calls a remote-enabled SAP
+function module to add/remove authorization values on a PFCG role. The
+original design assumed a standard SAP function module named
+PRGN_RFC_ACTIVITY_GROUP_CHANGE would already exist on the target system.
+
+That assumption should not be trusted:
+  - Whether PRGN_RFC_ACTIVITY_GROUP_CHANGE exists, is RFC-enabled, and
+    has this exact interface varies by release and was never confirmed.
+  - It sits in SAP's own namespace. Creating an object under that name
+    yourself is a modification to SAP's namespace, not normal custom
+    development, and can be overwritten by a support package.
+
+So instead: create a CUSTOM function module under your own Z namespace
+with the interface below. domain.py already calls ZFM_RR_ROLE_AUTH_CHANGE.
+
+DESIGN (v2.5) - DRIVES PFCG'S OWN FUNCTION MODULES, NEVER WRITES TABLES
+------------------------------------------------------------------------
+v1 wrote to AGR_1251 directly. That bypasses PFCG's maintenance layer and
+leaves AGR_1250/AGR_1252/status flags out of step. v2 calls the same
+standard PRGN_* function modules PFCG itself uses (all exist on TS3,
+S/4HANA 2023, SAP_BASIS 758; S_PROFGEN is a package, not a function
+group):
+
+  1. PRGN_ACTIVITY_GROUP_ENQUEUE     lock the role
+  2. PRGN_DOWNLOAD_AGR               backup: snapshot returned in ROLE_BACKUP
+  3. PRGN_CLEAR_BUFFER               reset the function group's buffers
+     PRGN_1250_READ_AUTH_DATA        read PT1250 (auth headers)
+     PRGN_1251_READ_FIELD_VALUES     read PT1251 (field values)
+  4. (in memory)                     apply deletes, then adds
+  5. PRGN_1251_SAVE_FIELD_VALUES     } only fill the global BUFFERS - they
+     PRGN_1250_SAVE_AUTH_DATA        } never write the database
+  6. PRGN_UPDATE_DATABASE            flush buffers -> AGR_1250/AGR_1251,
+                                     set profile timestamp, COMMIT WORK
+  7. PRGN_AUTO_GENERATE_PROFILE_NEW  regenerate the profile
+  8. PRGN_ACTIVITY_GROUP_DEQUEUE     unlock (also on every failure path)
+
+These are NOT released BAPIs. SAP gives no compatibility guarantee across
+releases or support packages - pin and re-test per target system.
+
+Lessons from the TS3 sandbox runs (why the code looks the way it does):
+  - Step 6 is essential. Without it the run ends with no exception and
+    the role untouched (the save FMs only set GLOBAL_AGR_*_UPDATE flags).
+  - Do NOT flag a removed value DELETED = 'X': PFCG then shows the field
+    "Inactive" (no check on the field at all). Drop the row instead.
+  - MODIFIED = 'G' is "Maintained" in PFCG, 'S' is "Standard".
+  - PRGN_UPDATE_DATABASE commits. After step 6 the change is in the
+    database: a later PROFILE_GENERATION_FAILED means "role changed,
+    profile stale", and ROLE_BACKUP is a snapshot, not an automatic
+    rollback (PRGN_UPLOAD_AGR reads a file by name and raises NO_BATCH -
+    unusable headless).
+  - The S_USER_AGR check uses field ACT_GROUP (not AGR_NAME).
+  - Checks run BEFORE any write and raise, so a bad request changes
+    nothing: OBJECT_NOT_ON_ROLE, FIELD_NOT_ON_AUTH, VALUE_NOT_FOUND
+    (a delete matching nothing), VALUE_ALREADY_EXISTS (a duplicate add).
+
+Verified on TS3 in a sandbox client (test role ZX:TEST_REMEDIATION_
+SINGLEROLE), checking SE16 AGR_1251, PFCG, SM12 and UST12:
+  modify (delete + add in one call), add, and all seven refusals above
+  plus ROLE_LOCKED and NO_AUTHORIZATION; lock released after success and
+  failure; generated profile contains the new values.
+
+Not verified / known gaps:
+  - ROLE_NOT_FOUND, UPDATE_FAILED and BACKUP_FAILED were never triggered.
+  - PROFILE_GENERATION_FAILED was seen once (adding a duplicate value on
+    the pre-v2.5 version) without a known cause; the RETURN table now
+    carries the generator's messages for the next occurrence.
+  - Org-level fields (AGR_1252, PRGN_1252_*_ORG_LEVELS) are not handled;
+    the Python side reports those entries as failed with manual steps.
+  - Adding a whole new authorization object to a role is not handled.
+  - Whether the request/transport (lv_request) matters for transportable
+    roles: it is captured but not used.
+  - RFC-enablement of the PRGN_* FMs does not matter: only this Z FM is
+    called over RFC; it calls them locally.
+
+IMPORTANT — READ BEFORE CREATING THIS ANYWHERE
+------------------------------------------------
+Tested only in a sandbox client, on one role. Before using it elsewhere:
+  1. Have your ABAP/Basis team review it.
+  2. Create and test it in a SANDBOX or development client first -
+     never directly in production.
+  3. Re-run the STEP 5 tests on that system: the PRGN_* internals can
+     differ per release.
+
+
+STEP 1 — DDIC structure (SE11)
+--------------------------------
+  Structure name: ZROLE_AUTH_VALUE
+  Short description: One authorization value (role auth add/remove)
+
+  Typing method "Types" for every component. Component type must be a
+  DATA ELEMENT (or a Predefined Type) - NOT a "TABLE-FIELD" reference
+  such as AGR_1251-OBJECT; SE11 rejects that with "Component type or
+  domain used not active or does not exist".
+
+  Component   Component type   Notes
+  ---------   --------------   -----
+  OBJECT      XUOBJECT         same types PT1250/PT1251 use
+  FIELD       TPRFIELD
+  LOW         XUVAL
+  HIGH        XUVAL
+
+  If any of these data elements is missing on your release, use
+  Predefined Type instead: OBJECT CHAR 10, FIELD CHAR 10, LOW CHAR 40,
+  HIGH CHAR 40 (sizes match AGR_1251).
+
+Activate it. (Same interface as v1.)
+
+
+STEP 2 — Function group (SE80 / SE37)
+----------------------------------------
+Reuse ZFG_MCPARCHPH if another capability's RFC setup already created
+it - all mcp_architecture_PH custom RFC function modules share this one
+group. Otherwise:
+
+  Function group: ZFG_MCPARCHPH
+  Short text:     Custom RFC utilities for mcp_architecture_PH (SAP MCP)
+
+
+STEP 3 — Function module (SE37)
+----------------------------------
+  Function module: ZFM_RR_ROLE_AUTH_CHANGE
+  Function group:  ZFG_MCPARCHPH
+  Short text:      Add/remove PFCG role authorization values (RFC-callable)
+
+  Attributes tab:
+    - Processing type: Remote-Enabled Module   <-- must be checked
+
+  Import tab:
+    Parameter name     Type spec              Optional  Default
+    ---------------     ---------              --------  -------
+    ACTIVITY_GROUP      TYPE AGR_NAME          (no)
+
+  Tables tab:
+    Parameter name                  Structure          Optional
+    ------------------------------  -----------------  --------
+    AUTHORIZATION_VALUES            ZROLE_AUTH_VALUE    yes
+    AUTHORIZATION_VALUES_DELETE     ZROLE_AUTH_VALUE    yes
+    ROLE_BACKUP                     TRTAB               yes   (PRGN_DOWNLOAD_AGR output)
+    RETURN                          BAPIRET2            yes   (generator messages on failure)
+
+  Exceptions tab:
+    ROLE_NOT_FOUND
+    UPDATE_FAILED
+    NO_AUTHORIZATION
+    PROFILE_GENERATION_FAILED
+    ROLE_LOCKED
+    BACKUP_FAILED
+    OBJECT_NOT_ON_ROLE
+    FIELD_NOT_ON_AUTH
+    VALUE_NOT_FOUND
+    VALUE_ALREADY_EXISTS
+
+
+STEP 4 — Source code
+------------------------
+Paste below the FUNCTION frame SE37 generated (it writes the interface
+comment block itself).
+
+ABAP has no "finally". Every failure path below calls DEQUEUE before
+RAISE; keep that pattern if you add a path.
+
+--------------------------------------------------------------------
+  DATA: lv_agr_name TYPE agr_name,
+        lv_request  TYPE trkorr,
+        ls_add      TYPE zrole_auth_value,
+        ls_del      TYPE zrole_auth_value,
+        lt_auth     TYPE STANDARD TABLE OF pt1250,
+        lt_fields   TYPE STANDARD TABLE OF pt1251,
+        ls_field    TYPE pt1251,
+        ls_auth     TYPE pt1250,
+        lt_return   TYPE bapirettab,
+        lt_gen_ret  TYPE STANDARD TABLE OF bapiret2.
+  FIELD-SYMBOLS: <fs_auth> TYPE pt1250.
+* Observed in AGR_1251 on TS3: MODIFIED = 'S' shows as "Standard" in
+* PFCG, 'G' shows as "Maintained" (manually maintained). Our values are
+* manual, so 'G'. Still CONFIRM the domain behind TPR_ST_MOD in SE11.
+  CONSTANTS: c_modified TYPE tpr_st_mod VALUE 'G'.
+
+  lv_agr_name = activity_group.
+
+  AUTHORITY-CHECK OBJECT 'S_USER_AGR'
+    ID 'ACTVT'     FIELD '02'
+    ID 'ACT_GROUP' FIELD lv_agr_name.
+  IF sy-subrc <> 0.
+    RAISE no_authorization.
+  ENDIF.
+
+  SELECT SINGLE agr_name FROM agr_define
+    INTO lv_agr_name
+    WHERE agr_name = lv_agr_name.
+  IF sy-subrc <> 0.
+    RAISE role_not_found.
+  ENDIF.
+
+* --- 1. lock ---
+  CALL FUNCTION 'PRGN_ACTIVITY_GROUP_ENQUEUE'
+    EXPORTING
+      activity_group = lv_agr_name
+      no_dialog      = 'X'          " CONFIRM IN SE37: safe headless
+    IMPORTING
+      new_request    = lv_request   " set if the role is transportable
+    EXCEPTIONS
+      foreign_lock   = 1
+      OTHERS         = 2.
+  IF sy-subrc = 1.
+    RAISE role_locked.
+  ELSEIF sy-subrc <> 0.
+    RAISE update_failed.
+  ENDIF.
+
+* --- 2. backup (PRGN_DOWNLOAD_AGR) ---
+*     Interface confirmed from SE37 on TS3. create_file_only = 'X' builds
+*     the export in FILE_CONTENT without writing any file on the server
+*     or opening a dialog; display_log = space suppresses the log popup.
+*     User assignments are not exported (with_user_assignment default).
+*     No automatic restore: PRGN_UPLOAD_AGR is file/GUI based (see header).
+  CALL FUNCTION 'PRGN_DOWNLOAD_AGR'
+    EXPORTING
+      activity_group          = lv_agr_name
+      with_authorization_data = 'X'
+      display_log             = space
+      create_file_only        = 'X'
+    IMPORTING
+      return                  = lt_return
+    TABLES
+      file_content            = role_backup
+    EXCEPTIONS
+      activity_group_does_not_exist = 1
+      not_authorized                = 2
+      OTHERS                        = 3.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE backup_failed.
+  ENDIF.
+
+* --- 3. read current auth data ---
+*     PRGN_CLEAR_BUFFER (no parameters, include LPRGNU09) resets all
+*     GLOBAL_AGR_*_UPDATE flags and buffers so a stale buffer from an
+*     earlier call in the same RFC session cannot be flushed by mistake.
+  CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+
+*     Confirmed interface: activity_group, no_texts, no_texts_save;
+*     TABLES auth_data TYPE pt1250 ONLY. There is NO PT1251 parameter -
+*     this FM returns auth headers and status, not field values. Field
+*     values (object/field/low/high) go through
+*     PRGN_1251_READ_FIELD_VALUES / PRGN_1251_SAVE_FIELD_VALUES (exist
+*     on TS3, interfaces not read yet) - fill in the two marked calls.
+  CALL FUNCTION 'PRGN_1250_READ_AUTH_DATA'
+    EXPORTING
+      activity_group = lv_agr_name
+      no_texts       = 'X'
+    TABLES
+      auth_data      = lt_auth
+    EXCEPTIONS
+      no_data_available = 1
+      OTHERS            = 2.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+  CALL FUNCTION 'PRGN_1251_READ_FIELD_VALUES'
+    EXPORTING
+      activity_group    = lv_agr_name
+    TABLES
+      field_values      = lt_fields
+    EXCEPTIONS
+      no_data_available = 1
+      OTHERS            = 2.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+* --- 4. apply changes in memory (PT1251 rows) ---
+*     PT1251 joins to PT1250 on object + auth + variant. Our input has
+*     only object/field/low/high, so an add targets the FIRST
+*     authorization instance of that object on the role. If the role has
+*     none, raise OBJECT_NOT_ON_ROLE - creating a new auth-object
+*     instance is out of scope for v2.
+  LOOP AT authorization_values_delete INTO ls_del.
+*   v2.3: drop the row. Do NOT set DELETED = 'X' here: on TS3 that made
+*   PFCG show the field as "Inactive" (no check on the field at all,
+*   and the added value was not active) - a security regression. The
+*   first run that "failed" to delete failed because the database flush
+*   (PRGN_UPDATE_DATABASE) was missing, not because dropping rows
+*   does not work.
+    DELETE lt_fields
+      WHERE object = ls_del-object
+        AND field  = ls_del-field
+        AND low    = ls_del-low.
+*   v2.5: a removal that matches nothing used to succeed silently (a
+*   typo in a request looked like success). Fail instead.
+    IF sy-subrc <> 0.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+        EXPORTING activity_group = lv_agr_name.
+      RAISE value_not_found.
+    ENDIF.
+*   Mark the parent auth as changed so PFCG regenerates it.
+    LOOP AT lt_auth ASSIGNING <fs_auth> WHERE object = ls_del-object.
+      <fs_auth>-modified = c_modified.
+    ENDLOOP.
+  ENDLOOP.
+
+  LOOP AT authorization_values INTO ls_add.
+    READ TABLE lt_auth INTO ls_auth WITH KEY object = ls_add-object.
+    IF sy-subrc <> 0.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+        EXPORTING activity_group = lv_agr_name.
+      RAISE object_not_on_role.
+    ENDIF.
+*   v2.4: the field must already exist on that authorization. Without
+*   this check a wrong FIELD (e.g. ACTVT value sent as DOKAR) is written
+*   silently: seen on TS3, "02" landed on DOKAR instead of ACTVT.
+    READ TABLE lt_fields TRANSPORTING NO FIELDS
+      WITH KEY object  = ls_add-object
+               auth    = ls_auth-auth
+               variant = ls_auth-variant
+               field   = ls_add-field.
+    IF sy-subrc <> 0.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+        EXPORTING activity_group = lv_agr_name.
+      RAISE field_not_on_auth.
+    ENDIF.
+*   v2.5: adding a value that already exists wrote a duplicate row and
+*   made profile generation fail on TS3 (data already committed by then).
+    READ TABLE lt_fields TRANSPORTING NO FIELDS
+      WITH KEY object  = ls_add-object
+               auth    = ls_auth-auth
+               variant = ls_auth-variant
+               field   = ls_add-field
+               low     = ls_add-low.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+        EXPORTING activity_group = lv_agr_name.
+      RAISE value_already_exists.
+    ENDIF.
+    CLEAR ls_field.
+    ls_field-object  = ls_add-object.
+    ls_field-auth    = ls_auth-auth.
+    ls_field-variant = ls_auth-variant.
+    ls_field-field   = ls_add-field.
+    ls_field-low     = ls_add-low.
+    ls_field-high    = ls_add-high.
+*   TPR_STA_IN flags (confirmed components: MODIFIED, DELETED, COPIED,
+*   NEU, NODE - all CHAR1 except NODE NUMC6): new value row is NEU.
+    ls_field-neu      = 'X'.
+    ls_field-modified = c_modified.
+    APPEND ls_field TO lt_fields.
+    READ TABLE lt_auth ASSIGNING <fs_auth>
+      WITH KEY object = ls_add-object auth = ls_auth-auth.
+    IF sy-subrc = 0.
+      <fs_auth>-modified = c_modified.
+    ENDIF.
+  ENDLOOP.
+
+* --- 5. save (field values, then auth headers) ---
+  CALL FUNCTION 'PRGN_1251_SAVE_FIELD_VALUES'
+    EXPORTING
+      activity_group = lv_agr_name
+    TABLES
+      field_values   = lt_fields.
+
+  CALL FUNCTION 'PRGN_1250_SAVE_AUTH_DATA'
+    EXPORTING
+      activity_group = lv_agr_name
+    TABLES
+      auth_data      = lt_auth
+    EXCEPTIONS
+      OTHERS         = 1.
+  IF sy-subrc <> 0.
+*   No automatic restore (see header); caller keeps ROLE_BACKUP.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+* v2.2: SAVE_AUTH_DATA / SAVE_FIELD_VALUES only fill the function
+* group's global buffers (GLOBAL_AGR_1250/1251 + *_UPDATE flags); they
+* never write the database (confirmed from their source on TS3 - the
+* first run left AGR_1251 untouched). PRGN_UPDATE_DATABASE (no
+* parameters, include LPRGNU48) flushes them: it tests
+* global_agr_1251_update = 'X' and PERFORMs the DB update.
+  CALL FUNCTION 'PRGN_UPDATE_DATABASE'
+    EXCEPTIONS
+      OTHERS = 1.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+* v2.1: commit the saved data BEFORE generating. The generator has
+* rebuild_auth_data = 'X' by default and may re-read the role from the
+* database, discarding uncommitted edits (first run: nothing persisted).
+  COMMIT WORK AND WAIT.
+  CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+
+* --- 6. regenerate the profile ---
+*     Without this the role definition changes but nothing takes effect
+*     for any user until someone regenerates in PFCG.
+*     Interface confirmed. Defaults worth knowing: rebuild_auth_data = 'X'
+*     (rebuilds PT1250/PT1251-derived data - runs AFTER our save, so it
+*     must not undo it: verify in sandbox) and
+*     fill_empty_fields_with_star = 'X' (empty fields become '*', PFCG's
+*     own behavior - do NOT change without security sign-off).
+  CALL FUNCTION 'PRGN_AUTO_GENERATE_PROFILE_NEW'
+    EXPORTING
+      activity_group   = lv_agr_name
+      no_dialog        = 'X'
+      generate_profile = 'X'
+      rebuild_auth_data = space
+      request          = lv_request
+    IMPORTING
+      new_request      = lv_request
+    TABLES
+      return           = lt_gen_ret
+    EXCEPTIONS
+      activity_group_does_not_exist = 1
+      activity_group_enqueued       = 2
+      no_auth_for_role_change       = 3
+      no_auth_for_gen               = 4
+      no_auths                      = 5
+      open_auths                    = 6
+      too_many_auths                = 7
+      profgen_tables_not_updated    = 8
+      error_when_generating_profile = 9
+      OTHERS                        = 10.
+  IF sy-subrc <> 0.
+*   v2.5: hand the generator's own messages back (data is ALREADY
+*   committed at this point: role changed, profile stale).
+    APPEND LINES OF lt_gen_ret TO return.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+      EXPORTING activity_group = lv_agr_name.
+    RAISE profile_generation_failed.
+  ENDIF.
+
+  COMMIT WORK AND WAIT.
+
+* --- 7. unlock ---
+  CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+    EXPORTING activity_group = lv_agr_name.
+
+ENDFUNCTION.
+--------------------------------------------------------------------
+
+Activate the function module.
+
+
+STEP 5 — Test in SE37 before pointing the MCP capability at it
+------------------------------------------------------------------
+Use SE37's test screen (F8) against a throwaway custom Z-role in a
+sandbox client:
+  Clear both input tables before every run - SE37 keeps the last input,
+  and a stale FIELD value once wrote a value onto the wrong field.
+  After each run check SE16 AGR_1251 (the stored rows), PFCG
+  (Authorizations tab, profile status) and SM12 (no leftover lock).
+
+  1. Modify: delete C_DRAW_TCD/DOKAR/'*', add C_DRAW_TCD/DOKAR/'AUT' in
+     ONE call. Expect DOKAR = AUT only, active, profile current.
+  2. Add: C_DRAW_TCD/ACTVT/'02' next to an existing '03'. Expect both.
+  3. Refusals - each must raise and leave the role unchanged:
+       FIELD_NOT_ON_AUTH     add a field the authorization doesn't have
+       OBJECT_NOT_ON_ROLE    add on an object the role doesn't have
+       VALUE_NOT_FOUND       delete a value that isn't there
+       VALUE_ALREADY_EXISTS  add a value that's already there
+  4. ROLE_LOCKED: hold the role open in PFCG (change mode) in a second
+     session, call again. Expect the exception, nothing changed.
+  5. Effective profile: SE16 UST10S for the role's profile, then UST12
+     for its authorization - the new values must be there, no '*'.
+  6. Only then point the RFC user in config_sap_systems.json's `rfc`
+     block at a system where this has been verified, and only then set
+     `confirmed=True` on tool_sapRR_executeAuthorizationChanges against
+     real data.

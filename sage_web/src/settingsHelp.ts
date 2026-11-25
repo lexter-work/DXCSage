@@ -80,6 +80,12 @@ export const SETTINGS_HELP: Record<string, SettingHelp> = {
     fallback: '50',
     effect: 'The user-role review and the user-role change refuse a larger request. Raise it only if people need bigger batches.',
   },
+  'rolechange.policy': {
+    summary: 'The policy a role authorization change request must meet before Sage will apply it.',
+    format: 'JSON object. "max_changes_per_request" is the most changes in one request. "allowed_activity_levels" lists the ACTVT codes a request may add or change. "restricted_objects" lists authorization objects, each with a "reason", that always need an exception.',
+    fallback: 'At most 50 changes, activity codes 01, 02, 03, 06, 16 and 70, and the objects S_DEVELOP, S_ADMI_FCD and S_USER_GRP restricted.',
+    effect: 'Read when a review or change starts. A request that breaks the policy is refused and has to go through the security team and PFCG. SAP standard roles (SAP_*) and the value * are always refused.',
+  },
   'sod.matrix': {
     summary: 'The segregation-of-duties rules the user SoD check workflow compares the roles of a user against.',
     format: 'JSON object with "conflicts", a list of rules. Each rule has "id", "object_1" and "object_2" (more sides as "object_3" and so on), "description", "risk_level" (CRITICAL, HIGH, MEDIUM or LOW) and "recommended_action". A side is an authorization object or a transaction code. Add "activity_1", "activity_2" (for example "01,02") to count a side only when the role grants one of those ACTVT codes. Names may use letters, digits and _ / . $ # @ -.',

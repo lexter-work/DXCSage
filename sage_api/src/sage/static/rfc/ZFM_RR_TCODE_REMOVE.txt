@@ -1,0 +1,92 @@
+*&---------------------------------------------------------------------*
+*& ZFM_RR_TCODE_REMOVE - remove a tcode from a role (FM 2)
+*&---------------------------------------------------------------------*
+*& Contains : STEP 4 function module ZFM_RR_TCODE_REMOVE
+*& Needs    : STEPS 1-2 in ZFM_RR_LOCAL_CLASSES.txt (local classes lcl_rr_tcode_removal,
+*&            lcx_rr_error)
+*& Status   : FINAL source. Signatures of every standard FM called were
+*&            checked against TS3. NOT yet activated or run on TS3.
+*& Engine   : 1. PRGN_RFC_DELETE_TRANSACTION   - menu entry (AGR_TCODES) only
+*&            2. PRGN_1250/1251 read + save    - exact tcode values in the
+*&               + PRGN_UPDATE_DATABASE          9 tcode objects
+*&            3. PRGN_AUTO_GENERATE_PROFILE_NEW - profile (rebuild_auth_data and
+*&                                                fill_empty_fields_with_star = space)
+*&            No batch input. Rejects SAP_*, composite and derived child roles.
+*& NOTE     : steps 2-3 of the engine use SAP-internal PRGN_* modules (not
+*&            released). Re-test after every support package on TS3.
+*& NOTE     : not all-or-nothing. The menu removal is committed before the
+*&            authorization cleanup. If the lock/save/generation fails you get E
+*&            with a "run again" message; running again is safe.
+*&
+*& INSTALL ORDER (same in all three files - do the steps in this order):
+*&   Before step 1 (nothing to paste): work in the Z package that already holds function
+*&   group ZFG_MCPARCHPH (not $TMP), so every object lands on one transport. The function
+*&   group is shared by all custom FMs and already exists - do NOT create it.
+*&   There are NO global classes: all logic sits in local classes of the function group.
+*&   1. Include LZFG_MCPARCHPHRRC in ZFG_MCPARCHPH (local classes)     in ZFM_RR_LOCAL_CLASSES.txt
+*&   2. One INCLUDE line in the top include LZFG_MCPARCHPHTOP          in ZFM_RR_LOCAL_CLASSES.txt
+*&   3. FM ZFM_RR_DERIVED_REGENERATE                                   in ZFM_RR_DERIVED_REGENERATE.txt
+*&   4. FM ZFM_RR_TCODE_REMOVE                                         in ZFM_RR_TCODE_REMOVE.txt  <== THIS FILE
+*&   Activate the function group after steps 1-2 (a syntax error in the include shows up
+*&   there), then create each FM. Each step sits between a >>> BEGIN and <<< END marker
+*&   in the file named above. Copy ONLY the code between the markers - never the markers
+*&   or this header.
+*&
+*& TS3 tests (use a COPY of ZX:TEST_REMEDIATION_SINGLEROLE):
+*&   1. IV_TEST_RUN = 'X'  -> reports menu entry + value count, changes nothing
+*&   2. role with 2+ tcodes -> gone from AGR_TCODES and AGR_1251, profile green
+*&   3. role where it is the ONLY tcode -> S_TCODE authorization inactive, NOT '*'
+*&      (least certain step; if generation fails with open_auths/no_auths -> E)
+*&   4. role with SE* -> removing SE38 returns W naming S_TCODE-TCD SE*
+*&   5. parent role -> then ZFM_RR_DERIVED_REGENERATE; check child AGR_TCODES
+*&   6. SM12 during test 2: does the role lock survive PRGN_UPDATE_DATABASE's commit?
+*&---------------------------------------------------------------------*
+
+
+*======================================================================*
+* >>> BEGIN STEP 4 of 4: Function module ZFM_RR_TCODE_REMOVE
+*     1. SE37 -> create ZFM_RR_TCODE_REMOVE in function group ZFG_MCPARCHPH
+*     2. Attributes tab: Remote-Enabled Module
+*     3. Import/Export tabs: enter the parameters from the *"Local Interface
+*        block below, all with Pass Value ticked (required for RFC)
+*     4. Source code tab: paste FUNCTION ... ENDFUNCTION., then activate
+*        (SE37 regenerates the *"Local Interface comment block itself)
+*     Copy from the line below this box down to the <<< END marker.
+*======================================================================*
+FUNCTION zfm_rr_tcode_remove.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_ROLE_NAME) TYPE  AGR_NAME
+*"     VALUE(IV_TCODE) TYPE  SYTCODE
+*"     VALUE(IV_TEST_RUN) TYPE  CHAR1 DEFAULT SPACE
+*"     VALUE(IV_REQUEST) TYPE  TRKORR OPTIONAL
+*"  EXPORTING
+*"     VALUE(EV_RETURN_TYPE) TYPE  BAPI_MTYPE
+*"     VALUE(EV_RETURN_MSG) TYPE  BAPI_MSG
+*"     VALUE(EV_TRANSPORT) TYPE  TRKORR
+*"     VALUE(EV_REMOVED_COUNT) TYPE  INT4
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+  " Parameter names are fixed by executor.py (_execute_tcode_removal_via_custom_fm).
+  " No classic exceptions: pyrfc would turn them into one error for the whole call.
+  DATA(request) = VALUE lcl_rr_tcode_removal=>removal_request(
+                    role      = to_upper( condense( iv_role_name ) )
+                    tcode     = to_upper( condense( iv_tcode ) )
+                    transport = iv_request ).
+  DATA(removal) = NEW lcl_rr_tcode_removal( ).
+
+  DATA(result) = COND lcl_rr_tcode_removal=>removal_result(
+                   WHEN iv_test_run = abap_true
+                   THEN removal->simulate( request )
+                   ELSE removal->remove( request ) ).
+
+  ev_return_type    = result-return_type.
+  ev_return_msg     = result-message.
+  ev_transport      = result-transport.
+  ev_removed_count  = result-removed_values.
+  et_return         = result-messages.
+ENDFUNCTION.
+*======================================================================*
+* <<< END STEP 4 of 4: Function module ZFM_RR_TCODE_REMOVE   (last line above: ENDFUNCTION.)
+*======================================================================*
