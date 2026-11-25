@@ -10,7 +10,7 @@ type Member = { email: string; name: string }
 const groups = ref<any[]>([]), log = ref<any[]>([]), ready = ref(true)
 const sel = ref<{ id: number | null; name: string; description: string; members: Member[] } | null>(null)
 const newMember = ref<Member>({ email: '', name: '' })
-const testTo = ref(''), testMsg = ref('')
+const testTo = ref(''), testMsg = ref(''), busy = ref<string | null>(null)
 
 async function load() {
   groups.value = await get('api/email/groups'); log.value = await get('api/email/log'); ready.value = (await get('api/email/status')).ready
@@ -24,17 +24,26 @@ function addMember() {
   newMember.value = { email: '', name: '' }
 }
 async function save() {
+  busy.value = 'save'
   const g = sel.value!
   if (newMember.value.email.trim()) addMember()
   const body = { name: g.name, description: g.description, members: g.members }
-  try { g.id ? await put(`api/email/groups/${g.id}`, body) : await post('api/email/groups', body); toast('Group saved'); sel.value = null; await load() } catch (e) { toast(e) }
+  try { g.id ? await put(`api/email/groups/${g.id}`, body) : await post('api/email/groups', body); toast('Group saved'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
 async function remove() {
-  try { await del(`api/email/groups/${sel.value!.id}`); toast('Group deleted'); sel.value = null; await load() } catch (e) { toast(e) }
+  busy.value = 'remove'
+  try { await del(`api/email/groups/${sel.value!.id}`); toast('Group deleted'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
 async function sendTest() {
+  busy.value = 'test'
   testMsg.value = ''
-  try { await post('api/email/test', { to: testTo.value }); testMsg.value = 'Test email sent.'; await load() } catch (e: any) { testMsg.value = e?.message ?? String(e) }
+  try { await post('api/email/test', { to: testTo.value }); testMsg.value = 'Test email sent.'; await load() }
+  catch (e: any) { testMsg.value = e?.message ?? String(e) }
+  finally { busy.value = null }
 }
 onMounted(load)
 </script>
@@ -52,7 +61,7 @@ onMounted(load)
       <h3 style="margin:0 0 6px">Send a test email</h3>
       <p class="help" style="margin:0 0 10px">Checks the mail server settings. It goes to one address and does not use a group.</p>
       <div class="rowx"><input v-model="testTo" class="field" type="email" autocomplete="email" placeholder="name@example.com" aria-label="Test email address" style="max-width:320px">
-        <button class="btn" :disabled="!testTo" @click="sendTest">Send test</button></div>
+        <button class="btn" :disabled="!testTo || busy==='test'" @click="sendTest"><span v-if="busy==='test'" class="spinner" />Send test</button></div>
       <p v-if="testMsg" class="help" role="status" style="margin:8px 0 0">{{ testMsg }}</p>
     </div></div>
 
@@ -75,8 +84,8 @@ onMounted(load)
           <label class="lbl">Name (optional)<input v-model="newMember.name" class="field" autocomplete="off" @keydown.enter.prevent="addMember"></label></div>
         <div><button class="btn sm" :disabled="!newMember.email.trim()" @click="addMember">Add member</button></div>
       </template>
-      <template #footer><button v-if="sel?.id" class="btn danger" @click="remove">Delete group</button><span class="sp" />
-        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim()" @click="save">Save group</button></template>
+      <template #footer><button v-if="sel?.id" class="btn danger" :disabled="busy==='remove'" @click="remove"><span v-if="busy==='remove'" class="spinner" />Delete group</button><span class="sp" />
+        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim() || busy==='save'" @click="save"><span v-if="busy==='save'" class="spinner" />Save group</button></template>
     </Drawer>
   </section>
 </template>

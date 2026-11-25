@@ -88,12 +88,14 @@ async function select(c: any) {
   if (['running', 'waiting'].includes(c.last_run_status)) attach(c.last_run_id)
   if (small.matches) thopen.value = false
 }
+const creatingChat = ref(false)
 async function newChat() {
   if (!provider.value || !model.value) return toast('Choose a provider and model first.')
+  creatingChat.value = true
   try {
     const { id } = await post('api/chats', { provider: provider.value, model: model.value })
     await loadChats(); setThreadsCollapsed(false); await select(chats.value.find(c => c.id === id))
-  } catch (e) { toast(e) }
+  } catch (e) { toast(e) } finally { creatingChat.value = false }
 }
 async function changeModel() {
   if (!current.value) return
@@ -127,7 +129,12 @@ async function send() {
   } catch (e) { text.value = t; pending.value = files; toast(e) }
 }
 function onKey(e: KeyboardEvent) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
-async function cancel() { if (activeRun.value) await post(`api/runs/${activeRun.value}/cancel`).catch(toast) }
+const cancelling = ref(false)
+async function cancel() {
+  if (!activeRun.value) return
+  cancelling.value = true
+  try { await post(`api/runs/${activeRun.value}/cancel`) } catch (e) { toast(e) } finally { cancelling.value = false }
+}
 async function remove() {
   const c = confirmDel.value; confirmDel.value = null
   await del(`api/chats/${c.id}`).catch(toast)
@@ -179,7 +186,7 @@ onBeforeUnmount(() => { closeStream(); clearInterval(tick); window.removeEventLi
             <option v-for="(_, p) in providers" :key="p" :value="p">{{ pname(p) }}</option></select>
           <select v-model="model" class="field" aria-label="Model"><option v-for="m in providers[provider] ?? []" :key="m">{{ m }}</option></select>
         </div>
-        <button class="btn primary" @click="newChat"><Icon name="plus" />New chat</button>
+        <button class="btn primary" :disabled="creatingChat" @click="newChat"><span v-if="creatingChat" class="spinner" /><Icon v-else name="plus" />New chat</button>
       </div>
       <div class="tlist">
         <template v-for="[label, list] in groups" :key="label">
@@ -204,7 +211,7 @@ onBeforeUnmount(() => { closeStream(); clearInterval(tick); window.removeEventLi
               <option v-for="(_, p) in providers" :key="p" :value="p">{{ pname(p) }}</option></select>·
             <select v-model="current.model" class="plainsel mono" aria-label="Model" @change="changeModel"><option v-for="m in providers[current.provider] ?? []" :key="m">{{ m }}</option></select></span>
           <span v-if="activeRun" class="chip"><span class="k">Run</span> <span class="mono">#{{ activeRun }}</span></span>
-          <button v-if="activeRun" class="btn sm danger" @click="cancel">Cancel run</button>
+          <button v-if="activeRun" class="btn sm danger" :disabled="cancelling" @click="cancel"><span v-if="cancelling" class="spinner" />Cancel run</button>
         </template>
       </div>
 
@@ -257,7 +264,7 @@ onBeforeUnmount(() => { closeStream(); clearInterval(tick); window.removeEventLi
           </ul>
           <div class="tools">
             <input ref="fileInput" type="file" accept=".xlsx" multiple hidden @change="onFiles">
-            <button type="button" class="btn sm" :disabled="!!activeRun || uploading" @click="fileInput?.click()">Attach Excel</button>
+            <button type="button" class="btn sm" :disabled="!!activeRun || uploading" @click="fileInput?.click()"><span v-if="uploading" class="spinner" />Attach Excel</button>
             <details class="tpl"><summary class="btn sm ghost">Templates</summary>
               <div class="menu"><a v-for="t in templates" :key="t[0]" :href="`api/templates/${t[0]}.xlsx`" download>{{ t[1] }}</a></div></details>
             <span class="sp" /><button class="btn primary sm" :disabled="!!activeRun || !text.trim()">Send</button></div>

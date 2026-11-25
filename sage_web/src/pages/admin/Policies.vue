@@ -9,26 +9,41 @@ import { toast } from '../../toast'
 const policies = ref<any[]>([]), reviews = ref<any[]>([])
 const sel = ref<{ id: number | null; name: string; text: string; required: boolean; fingerprint?: string } | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const busy = ref<string | null>(null)
 
 async function load() { policies.value = await get('api/policies') }
 function create() { sel.value = { id: null, name: '', text: '', required: false }; reviews.value = [] }
 async function open(p: any) { sel.value = { id: p.id, name: p.name, text: p.text, required: p.required, fingerprint: p.fingerprint }; reviews.value = await get(`api/policies/${p.id}/reviews`) }
 async function save() {
+  busy.value = 'save'
   const p = sel.value!, body = { name: p.name, text: p.text, required: p.required }
-  try { p.id ? await put(`api/policies/${p.id}`, body) : await post('api/policies', body); toast('Policy saved. Earlier reviews of the old text no longer count.'); sel.value = null; await load() } catch (e) { toast(e) }
+  try { p.id ? await put(`api/policies/${p.id}`, body) : await post('api/policies', body); toast('Policy saved. Earlier reviews of the old text no longer count.'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement, f = input.files?.[0]
   if (!f || !sel.value) return
+  busy.value = 'upload'
   try {
     const r = await fetch(`api/policies/extract?filename=${encodeURIComponent(f.name)}`, { method: 'PUT', credentials: 'same-origin', body: f })
     const j = await r.json().catch(() => ({}))
     if (!r.ok) return toast(j.detail ?? 'The file could not be read.')
     sel.value.text = j.text; if (!sel.value.name) sel.value.name = f.name.replace(/\.[^.]+$/, '')
-  } finally { input.value = '' }
+  } finally { input.value = ''; busy.value = null }
 }
-async function clear() { try { await post(`api/policies/${sel.value!.id}/clear-reviews`); reviews.value = []; toast('Reviews cleared. The next request is reviewed again.'); await load() } catch (e) { toast(e) } }
-async function remove() { try { await del(`api/policies/${sel.value!.id}`); toast('Policy deleted'); sel.value = null; await load() } catch (e) { toast(e) } }
+async function clear() {
+  busy.value = 'clear'
+  try { await post(`api/policies/${sel.value!.id}/clear-reviews`); reviews.value = []; toast('Reviews cleared. The next request is reviewed again.'); await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
+async function remove() {
+  busy.value = 'remove'
+  try { await del(`api/policies/${sel.value!.id}`); toast('Policy deleted'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
 onMounted(load)
 </script>
 <template>
@@ -47,7 +62,7 @@ onMounted(load)
         <label class="lbl">Name<input v-model="sel.name" class="field" maxlength="60"></label>
         <label class="chk"><input v-model="sel.required" type="checkbox"> Check every role and user-role request against this policy</label>
         <p class="help" style="margin:0">Without the tick, a policy is only checked when someone names it in the request.</p>
-        <div class="rowx"><input ref="fileInput" type="file" accept=".txt,.md,.docx" hidden @change="onFile"><button class="btn sm" @click="fileInput?.click()">Load text from a file</button><span class="help">.txt, .md or .docx</span></div>
+        <div class="rowx"><input ref="fileInput" type="file" accept=".txt,.md,.docx" hidden @change="onFile"><button class="btn sm" :disabled="busy==='upload'" @click="fileInput?.click()"><span v-if="busy==='upload'" class="spinner" />Load text from a file</button><span class="help">.txt, .md or .docx</span></div>
         <label class="lbl">Policy text<textarea v-model="sel.text" class="field" rows="14" maxlength="60000" spellcheck="true" /></label>
         <p v-if="sel.fingerprint" class="help" style="margin:0">Fingerprint <span class="mono">{{ sel.fingerprint }}</span></p>
         <template v-if="sel.id">
@@ -58,8 +73,8 @@ onMounted(load)
             <span v-for="(f, j) in r.findings" :key="j" class="help block bad">{{ f.role ? f.role + ': ' : '' }}{{ f.description }}</span></span></li></ul>
         </template>
       </template>
-      <template #footer><button v-if="sel?.id" class="btn danger" @click="remove">Delete</button><button v-if="sel?.id" class="btn" @click="clear">Clear reviews</button><span class="sp" />
-        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim() || !sel?.text.trim()" @click="save">Save</button></template>
+      <template #footer><button v-if="sel?.id" class="btn danger" :disabled="busy==='remove'" @click="remove"><span v-if="busy==='remove'" class="spinner" />Delete</button><button v-if="sel?.id" class="btn" :disabled="busy==='clear'" @click="clear"><span v-if="busy==='clear'" class="spinner" />Clear reviews</button><span class="sp" />
+        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim() || !sel?.text.trim() || busy==='save'" @click="save"><span v-if="busy==='save'" class="spinner" />Save</button></template>
     </Drawer>
   </section>
 </template>

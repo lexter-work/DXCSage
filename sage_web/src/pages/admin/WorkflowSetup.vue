@@ -8,6 +8,7 @@ import Drawer from '../../components/Drawer.vue'
 import { toast } from '../../toast'
 
 const source = ref<{ name: string; text: string } | null>(null)
+const busy = ref<string | null>(null)
 
 const { name, systemId } = useRoute().params as { name: string; systemId: string }
 const base = `api/workflows/${name}/systems/${systemId}`
@@ -67,10 +68,25 @@ async function load() {
   values.value = { ...(binding.value?.settings ?? {}) }
   for (const s of wf.value.settings) if (s.lookup && !opts.value[s.key]) loadOptions(s.key)
 }
-async function saveSettings() { try { await put(base, { settings: values.value }); toast('Settings saved'); await load() } catch (e) { toast(e) } }
-async function check() { try { await post(`${base}/check`); await load() } catch (e) { toast(e) } }
-async function enable() { try { await post(`${base}/enable`); toast('Enabled'); await load() } catch (e) { toast(e) } }
-async function disable() { await post(`${base}/disable`); await load() }
+async function saveSettings() {
+  busy.value = 'settings'
+  try { await put(base, { settings: values.value }); toast('Settings saved'); await load() }
+  catch (e) { toast(e) } finally { busy.value = null }
+}
+async function check() {
+  busy.value = 'check'
+  try { await post(`${base}/check`); await load() }
+  catch (e) { toast(e) } finally { busy.value = null }
+}
+async function enable() {
+  busy.value = 'enable'
+  try { await post(`${base}/enable`); toast('Enabled'); await load() }
+  catch (e) { toast(e) } finally { busy.value = null }
+}
+async function disable() {
+  busy.value = 'disable'
+  try { await post(`${base}/disable`); await load() } finally { busy.value = null }
+}
 async function copyMarkdown() {
   try { await navigator.clipboard.writeText(await get(`${base}/guide?format=markdown`)); toast('Guide copied as Markdown') } catch (e) { toast(e) }
 }
@@ -123,10 +139,10 @@ onMounted(() => load().catch(toast))
     <div class="actbar">
       <StatusPill :status="binding?.status" /><span class="muted" style="font-size:12.5px">health</span><StatusPill :status="binding?.health" :label="binding?.health === 'unknown' ? 'Not checked' : undefined" />
       <span class="sp" />
-      <button class="btn" @click="check">Run health check</button>
+      <button class="btn" :disabled="busy==='check'" @click="check"><span v-if="busy==='check'" class="spinner" />Run health check</button>
       <button class="btn" @click="copyMarkdown">Copy guide as Markdown</button>
-      <button v-if="binding?.status !== 'enabled'" class="btn primary" @click="enable">Enable</button>
-      <button v-else class="btn danger" @click="disable">Disable</button>
+      <button v-if="binding?.status !== 'enabled'" class="btn primary" :disabled="busy==='enable'" @click="enable"><span v-if="busy==='enable'" class="spinner" />Enable</button>
+      <button v-else class="btn danger" :disabled="busy==='disable'" @click="disable"><span v-if="busy==='disable'" class="spinner" />Disable</button>
     </div>
 
     <div class="guide">
@@ -159,7 +175,7 @@ onMounted(() => load().catch(toast))
               </div>
               <span v-if="nameErr[o.object_id]" :id="'ane-' + o.object_id" class="help bad" role="alert">{{ nameErr[o.object_id] }}</span>
             </div>
-            <div><button class="btn sm" :disabled="!dirtyObjects.length || savingNames">Save names</button></div>
+            <div><button class="btn sm" :disabled="!dirtyObjects.length || savingNames"><span v-if="savingNames" class="spinner" />Save names</button></div>
           </form></div>
         <div v-if="wf?.settings.length" class="sidecard"><h3>Settings for this system</h3><div class="in">
           <label v-for="s in wf.settings" :key="s.key" class="lbl">{{ s.label }}
@@ -173,9 +189,9 @@ onMounted(() => load().catch(toast))
             <span v-if="s.lookup && lookup(s.key)?.error" class="help bad">Could not read the list from SAP ({{ lookup(s.key).error }}). Type the name instead.</span>
             <span v-else-if="s.lookup && lookup(s.key) && !lookup(s.key).loading && !lookup(s.key).list.length" class="help">No variant exists for RC_COLLECT_ANALYSIS_DATA on this system. Create one in SA38, then reload.</span>
             <span v-if="missing(s.key)" class="help bad">This variant is not on the system. The workflow will fail until it exists.</span>
-            <button v-if="s.lookup" type="button" class="btn sm" style="justify-self:start" :disabled="lookup(s.key)?.loading" @click="loadOptions(s.key)">Reload from SAP</button>
+            <button v-if="s.lookup" type="button" class="btn sm" style="justify-self:start" :disabled="lookup(s.key)?.loading" @click="loadOptions(s.key)"><span v-if="lookup(s.key)?.loading" class="spinner" />Reload from SAP</button>
           </label>
-          <div><button class="btn sm" @click="saveSettings">Save settings</button></div></div></div>
+          <div><button class="btn sm" :disabled="busy==='settings'" @click="saveSettings"><span v-if="busy==='settings'" class="spinner" />Save settings</button></div></div></div>
         <div v-if="covValues.length" class="sidecard"><h3>Authorizations for the RFC user<span class="sp" />
             <button class="btn sm" :disabled="!needAction.length" @click="copyRequest">Copy request for security</button></h3>
           <div class="in" style="padding-bottom:0">

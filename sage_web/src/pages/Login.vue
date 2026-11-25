@@ -35,7 +35,7 @@ async function submit() {
         <p>Use the local account your admin created.</p>
         <label class="lbl">Username<input v-model="username" class="field" autocomplete="username" required></label>
         <label class="lbl">Password<input v-model="password" class="field" type="password" autocomplete="current-password" required></label>
-        <button class="btn primary" :disabled="busy">Sign in</button>
+        <button class="btn primary" :disabled="busy"><span v-if="busy" class="spinner" />Sign in</button>
         <span class="muted" style="font-size:12px">Too many failed attempts lock sign-in for 15 minutes.</span>
       </form>
     </div>

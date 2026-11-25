@@ -7,13 +7,21 @@ import StatusPill from '../../components/StatusPill.vue'
 import { toast } from '../../toast'
 
 const router = useRouter()
-const workflows = ref<any[]>([]), systems = ref<any[]>([]), pick = ref<Record<string, number>>({})
+const workflows = ref<any[]>([]), systems = ref<any[]>([]), pick = ref<Record<string, number>>({}), busy = ref<string | null>(null)
 async function load() { workflows.value = await get('api/workflows'); systems.value = (await get<any[]>('api/systems')).filter(s => s.status === 'active') }
-async function setState(w: any) { try { await put(`api/workflows/${w.name}/state`, { enabled: !w.enabled }); await load() } catch (e) { toast(e) } }
+async function setState(w: any) {
+  busy.value = 'state-' + w.name
+  try { await put(`api/workflows/${w.name}/state`, { enabled: !w.enabled }); await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
 async function setUp(w: any) {
   const id = pick.value[w.name]
   if (!id) return toast('Choose a system first.')
-  try { await put(`api/workflows/${w.name}/systems/${id}`, { settings: {} }); router.push(`/admin/workflows/${w.name}/${id}`) } catch (e) { toast(e) }
+  busy.value = 'setup-' + w.name
+  try { await put(`api/workflows/${w.name}/systems/${id}`, { settings: {} }); router.push(`/admin/workflows/${w.name}/${id}`) }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
 // Email notifications: which groups get an email on which state of the workflow.
 const nf = ref<any | null>(null), allGroups = ref<any[]>([])
@@ -29,8 +37,11 @@ async function openNotif(w: any) {
 function toggleGroup(gid: number) { const s = nf.value.sel; if (s[gid]) delete s[gid]; else s[gid] = { events: ['completed', 'failed'], mode: 'instant' } }
 function toggleEvent(gid: number, key: string) { const a: string[] = nf.value.sel[gid].events; const i = a.indexOf(key); if (i < 0) a.push(key); else a.splice(i, 1) }
 async function saveNotif() {
+  busy.value = 'notif'
   const rules = Object.entries(nf.value.sel as Record<string, { events: string[]; mode: string }>).map(([g, v]) => ({ group_id: Number(g), events: v.events, mode: v.mode }))
-  try { await put(`api/workflows/${nf.value.name}/notifications`, { rules }); toast('Email notifications saved'); nf.value = null } catch (e) { toast(e) }
+  try { await put(`api/workflows/${nf.value.name}/notifications`, { rules }); toast('Email notifications saved'); nf.value = null }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
 onMounted(load)
 </script>
@@ -42,7 +53,7 @@ onMounted(load)
         <h2>{{ w.name }}</h2>
         <div class="tags"><StatusPill :status="w.enabled ? 'enabled' : 'disabled'" /><span v-if="w.durable" class="pill off">Long-running</span></div>
         <p class="desc">{{ w.description }}</p>
-        <div class="rowx"><button class="btn sm" :class="{ primary: !w.enabled }" @click="setState(w)">{{ w.enabled ? 'Disable workflow' : 'Enable workflow' }}</button>
+        <div class="rowx"><button class="btn sm" :class="{ primary: !w.enabled }" :disabled="busy==='state-'+w.name" @click="setState(w)"><span v-if="busy==='state-'+w.name" class="spinner" />{{ w.enabled ? 'Disable workflow' : 'Enable workflow' }}</button>
           <button class="btn sm ghost" @click="openNotif(w)">Email notifications</button></div>
       </div>
       <div v-if="!w.needs_system"><div class="panel"><div class="muted" style="padding:18px">This workflow needs no system and no setup. It is available to the model once it is enabled.</div></div></div>
@@ -60,7 +71,7 @@ onMounted(load)
         <div class="setup">
           <select v-model="pick[w.name]" class="field" :aria-label="`System for ${w.name}`"><option :value="undefined" disabled>Choose a system</option>
             <option v-for="s in systems" :key="s.id" :value="s.id">{{ s.label }} ({{ s.sid }})</option></select>
-          <button class="btn primary" @click="setUp(w)">Set up on this system</button>
+          <button class="btn primary" :disabled="busy==='setup-'+w.name" @click="setUp(w)"><span v-if="busy==='setup-'+w.name" class="spinner" />Set up on this system</button>
         </div>
       </div>
     </div>
@@ -80,7 +91,7 @@ onMounted(load)
           </div>
         </div>
       </template>
-      <template #footer><button class="btn" @click="nf = null">Cancel</button><button class="btn primary" @click="saveNotif">Save</button></template>
+      <template #footer><button class="btn" @click="nf = null">Cancel</button><button class="btn primary" :disabled="busy==='notif'" @click="saveNotif"><span v-if="busy==='notif'" class="spinner" />Save</button></template>
     </Drawer>
   </section>
 </template>

@@ -7,7 +7,7 @@ import HelpPopover from '../../components/HelpPopover.vue'
 import { SETTINGS_HELP } from '../../settingsHelp'
 import { toast } from '../../toast'
 
-const raw = ref<Record<string, any>>({}), sel = ref<string | null>(null), text = ref('')
+const raw = ref<Record<string, any>>({}), sel = ref<string | null>(null), text = ref(''), busy = ref<string | null>(null)
 const isSecret = (v: any) => v && typeof v === 'object' && 'set' in v && Object.keys(v).length === 1
 const GROUPS: [string, string[]][] = [['Providers', ['providers.']], ['Agent and waiting', ['agent.', 'wait.']], ['SAP and health', ['sap.', 'health.']], ['Workflows', ['workflows.', 'readiness.', 'sod.', 'addon.', 'rolechange.', 'email.']]]
 const grouped = computed(() => GROUPS.map(([label, prefixes]) => [label, Object.entries(raw.value).filter(([k]) => prefixes.some(p => k.startsWith(p))).map(([key, v]) => ({
@@ -17,19 +17,21 @@ const missing = computed(() => [['providers.anthropic_api_key', 'Claude'], ['pro
 const title = computed(() => !Object.keys(raw.value).length ? 'Settings' : missing.value.length === 2 ? 'Claude and GPT have no API key yet' : missing.value.length ? `${missing.value[0][1]} has no API key yet` : 'Settings')
 const load = async () => (raw.value = await get('api/settings'))
 async function syncModels() {
+  busy.value = 'sync'
   try {
     const { errors } = await post('api/settings/providers/sync-models', {})
     toast(Object.keys(errors).length ? `Synced, but: ${Object.values(errors).join('; ')}` : 'Model list synced')
     await load()
-  } catch (e) { toast(e) }
+  } catch (e) { toast(e) } finally { busy.value = null }
 }
 function open(r: any) { sel.value = r.key; text.value = r.secret ? '' : JSON.stringify(raw.value[r.key], null, 2) }
 async function save() {
+  busy.value = 'save'
   const secret = isSecret(raw.value[sel.value!])
   try {
     await put('api/settings', { key: sel.value, value: secret ? text.value : JSON.parse(text.value) })
     toast('Saved'); sel.value = null; await load()
-  } catch (e) { toast(e instanceof SyntaxError ? 'The value is not valid JSON.' : e) }
+  } catch (e) { toast(e instanceof SyntaxError ? 'The value is not valid JSON.' : e) } finally { busy.value = null }
 }
 const short = (v: string) => v.length > 110 ? v.slice(0, 110) + '…' : v
 onMounted(load)
@@ -42,7 +44,7 @@ onMounted(load)
       <thead><tr><th style="width:280px">Setting</th><th>Value</th></tr></thead>
       <tbody>
         <template v-for="[label, list] in grouped" :key="label">
-          <tr class="grp"><td colspan="2">{{ label }}<button v-if="label === 'Providers'" class="btn sm" style="float:right" @click.stop="syncModels">Sync models from API</button></td></tr>
+          <tr class="grp"><td colspan="2">{{ label }}<button v-if="label === 'Providers'" class="btn sm" style="float:right" :disabled="busy==='sync'" @click.stop="syncModels"><span v-if="busy==='sync'" class="spinner" />Sync models from API</button></td></tr>
           <tr v-for="r in list" :key="r.key" class="click" tabindex="0" @click="open(r)" @keydown.enter="open(r)">
             <td><span class="keycell"><span class="mono">{{ r.key }}</span><HelpPopover v-if="SETTINGS_HELP[r.key]" :title="r.key" :help="SETTINGS_HELP[r.key]" /></span></td>
             <td class="wrap" style="color:var(--ink)"><span v-if="r.secret" class="pill" :class="r.set ? 'ok' : 'warn'">{{ r.set ? 'Set' : 'Not set' }}</span><span v-else class="mono">{{ short(r.value) }}</span></td>
@@ -55,7 +57,7 @@ onMounted(load)
       <label v-if="!isSecret(raw[sel ?? ''])" class="lbl">Value (JSON)<textarea v-model="text" class="field" rows="16" spellcheck="false" /></label>
       <label v-else class="lbl">New secret value (never shown again)<input v-model="text" class="field" type="password" autocomplete="new-password"></label>
       <div class="callout info"><span>{{ isSecret(raw[sel ?? '']) ? 'Stored encrypted with the master key. The current value is never shown.' : 'Saved values are validated as JSON. The change is written to the audit log.' }}</span></div>
-      <template #footer><button class="btn" @click="sel = null">Cancel</button><button class="btn primary" @click="save">Save</button></template>
+      <template #footer><button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="busy==='save'" @click="save"><span v-if="busy==='save'" class="spinner" />Save</button></template>
     </Drawer>
   </section>
 </template>

@@ -5,9 +5,15 @@ import StatusPill from '../../components/StatusPill.vue'
 import { toast } from '../../toast'
 
 const m = ref<any>({ systems: [], workflows: [], cells: [] })
+const busy = ref<number | 'all' | null>(null)
 const load = async () => (m.value = await get('api/health/matrix'))
 const cell = (w: string, s: number) => m.value.cells.find((c: any) => c.workflow === w && c.system_id === s)
-async function recheck(system_id?: number) { try { await post('api/health/recheck', { system_id: system_id ?? null }); await load(); toast('Re-checked') } catch (e) { toast(e) } }
+async function recheck(system_id?: number) {
+  busy.value = system_id ?? 'all'
+  try { await post('api/health/recheck', { system_id: system_id ?? null }); await load(); toast('Re-checked') }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
 
 const count = (h: string) => m.value.cells.filter((c: any) => c.health === h).length
 const blocking = computed(() => m.value.systems.filter((s: any) => m.value.cells.some((c: any) => c.system_id === s.id && c.health === 'fail')).map((s: any) => s.label))
@@ -23,7 +29,7 @@ onMounted(load)
 <template>
   <section class="page">
     <div class="head"><div><h1>{{ title }}</h1><p>Health per system and workflow. Checks are read-only and never run a write function.</p></div><span class="sp" />
-      <button class="btn primary" @click="recheck()">Re-check all</button></div>
+      <button class="btn primary" :disabled="busy==='all'" @click="recheck()"><span v-if="busy==='all'" class="spinner" />Re-check all</button></div>
     <div v-if="m.cells.length" class="summary">
       <div class="big">{{ count('pass') }}<span> / {{ m.cells.length }} setups pass</span></div>
       <div class="muted">{{ count('warn') }} warning{{ count('warn') === 1 ? '' : 's' }} · {{ count('fail') }} failure{{ count('fail') === 1 ? '' : 's' }}</div>
@@ -37,7 +43,7 @@ onMounted(load)
             <router-link v-if="cell(w, s.id)" :class="CELL[cell(w, s.id).health]?.[0] ?? 'celloff'" :to="`/admin/workflows/${w}/${s.id}`">{{ CELL[cell(w, s.id).health]?.[1] ?? 'Not checked' }}</router-link>
             <span v-else class="celloff">Not set up</span>
           </td>
-          <td><button class="btn sm" @click="recheck(s.id)">Re-check</button></td>
+          <td><button class="btn sm" :disabled="busy===s.id" @click="recheck(s.id)"><span v-if="busy===s.id" class="spinner" />Re-check</button></td>
         </tr>
         <tr v-if="!m.systems.length"><td :colspan="m.workflows.length + 2" class="muted">No systems registered yet.</td></tr>
       </tbody></table></div>

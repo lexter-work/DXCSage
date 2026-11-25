@@ -6,7 +6,7 @@ import Drawer from '../../components/Drawer.vue'
 import StatusPill from '../../components/StatusPill.vue'
 import { toast } from '../../toast'
 
-const schedules = ref<any[]>([]), workflows = ref<any[]>([])
+const schedules = ref<any[]>([]), workflows = ref<any[]>([]), busy = ref<string | null>(null)
 type Form = { id: number | null; name: string; workflow: string; system: string; extra: Record<string, string>; kind: 'interval' | 'daily'; interval: number; at: string; enabled: boolean }
 const sel = ref<Form | null>(null)
 
@@ -32,14 +32,32 @@ function input(): Record<string, unknown> {
   return out
 }
 async function save() {
+  busy.value = 'save'
   const f = sel.value!
   const body = { name: f.name, workflow: f.workflow, input: input(), kind: f.kind, enabled: f.enabled,
     interval_minutes: f.kind === 'interval' ? Number(f.interval) : null, at_time: f.kind === 'daily' ? f.at : null }
-  try { f.id ? await put(`api/schedules/${f.id}`, body) : await post('api/schedules', body); toast('Schedule saved'); sel.value = null; await load() } catch (e) { toast(e) }
+  try { f.id ? await put(`api/schedules/${f.id}`, body) : await post('api/schedules', body); toast('Schedule saved'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
 }
-async function toggle(s: any) { try { await post(`api/schedules/${s.id}/enabled`, { enabled: !s.enabled }); await load() } catch (e) { toast(e) } }
-async function runNow(s: any) { try { await post(`api/schedules/${s.id}/run`); toast('Run started'); await load() } catch (e) { toast(e) } }
-async function remove() { try { await del(`api/schedules/${sel.value!.id}`); toast('Schedule deleted. Its past runs stay on the Runs page.'); sel.value = null; await load() } catch (e) { toast(e) } }
+async function toggle(s: any) {
+  busy.value = 'toggle'
+  try { await post(`api/schedules/${s.id}/enabled`, { enabled: !s.enabled }); await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
+async function runNow(s: any) {
+  busy.value = 'runNow'
+  try { await post(`api/schedules/${s.id}/run`); toast('Run started'); await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
+async function remove() {
+  busy.value = 'remove'
+  try { await del(`api/schedules/${sel.value!.id}`); toast('Schedule deleted. Its past runs stay on the Runs page.'); sel.value = null; await load() }
+  catch (e) { toast(e) }
+  finally { busy.value = null }
+}
 const when = (s: any) => (s.kind === 'interval' ? (s.interval_minutes % 1440 === 0 ? `Every ${s.interval_minutes / 1440} day(s)` : s.interval_minutes % 60 === 0 ? `Every ${s.interval_minutes / 60} hour(s)` : `Every ${s.interval_minutes} min`) : `Daily at ${s.at_time} UTC`)
 const rows = computed(() => schedules.value.map(s => ({ ...s, when: when(s), target: `${s.workflow} on ${s.input.system_name ?? '-'}`, state: s.enabled ? (s.last_run_status ?? 'waiting') : 'disabled' })))
 onMounted(load)
@@ -71,11 +89,11 @@ onMounted(load)
           <label v-else class="lbl">Time (UTC)<input v-model="sel.at" class="field mono" type="time"></label>
         </div>
         <label class="chk"><input v-model="sel.enabled" type="checkbox"> Enabled</label>
-        <div v-if="sel.id" class="rowx"><button class="btn sm" @click="runNow(schedules.find(s => s.id === sel!.id))">Run now</button>
-          <button class="btn sm" @click="toggle(schedules.find(s => s.id === sel!.id)); sel = null">{{ sel.enabled ? 'Disable' : 'Enable' }}</button></div>
+        <div v-if="sel.id" class="rowx"><button class="btn sm" :disabled="busy==='runNow'" @click="runNow(schedules.find(s => s.id === sel!.id))"><span v-if="busy==='runNow'" class="spinner" />Run now</button>
+          <button class="btn sm" :disabled="busy==='toggle'" @click="toggle(schedules.find(s => s.id === sel!.id)); sel = null"><span v-if="busy==='toggle'" class="spinner" />{{ sel.enabled ? 'Disable' : 'Enable' }}</button></div>
       </template>
-      <template #footer><button v-if="sel?.id" class="btn danger" @click="remove">Delete</button><span class="sp" />
-        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim() || !sel?.system" @click="save">Save</button></template>
+      <template #footer><button v-if="sel?.id" class="btn danger" :disabled="busy==='remove'" @click="remove"><span v-if="busy==='remove'" class="spinner" />Delete</button><span class="sp" />
+        <button class="btn" @click="sel = null">Cancel</button><button class="btn primary" :disabled="!sel?.name.trim() || !sel?.system || busy==='save'" @click="save"><span v-if="busy==='save'" class="spinner" />Save</button></template>
     </Drawer>
   </section>
 </template>
