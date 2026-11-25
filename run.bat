@@ -112,8 +112,22 @@ for /f "usebackq eol=# tokens=1,* delims==" %%a in ("%~dp0.env") do (
 )
 exit /b 0
 
+:install_uv
+echo uv is not installed. Installing it now...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+exit /b 0
+
+:install_pnpm
+echo pnpm is not installed. Installing it now...
+where winget >nul 2>&1 || ( echo winget is not available; install pnpm manually from https://pnpm.io/installation & exit /b 1 )
+winget install -e --id pnpm.pnpm --accept-package-agreements --accept-source-agreements
+set "PATH=%LOCALAPPDATA%\pnpm;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+exit /b 0
+
 :start_api
 call :isup %API_PORT% && ( echo API is already running on port %API_PORT%. & exit /b 0 )
+where uv >nul 2>&1 || call :install_uv
 where uv >nul 2>&1 || ( echo uv is not installed or not on PATH. & exit /b 1 )
 call :loadenv || exit /b 1
 if not exist "%~dp0sage_api\.venv" (
@@ -126,6 +140,7 @@ exit /b 0
 
 :start_web
 call :isup %WEB_PORT% && ( echo Web is already running on port %WEB_PORT%. & exit /b 0 )
+where pnpm >nul 2>&1 || call :install_pnpm
 where pnpm >nul 2>&1 || ( echo pnpm is not installed or not on PATH. & exit /b 1 )
 if not exist "%~dp0sage_web\node_modules" (
   echo First run: installing web dependencies...
