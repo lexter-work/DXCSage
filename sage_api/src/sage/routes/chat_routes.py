@@ -6,7 +6,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from sage.deps import current_user
-from sage.report import build_report
+from sage.reports import build as build_report
 from sage.sap.excel_requests import KINDS, build_template
 from sage.uploads import UploadError
 from sage.util import iso
@@ -186,7 +186,7 @@ async def report(call_id: int, request: Request, user: dict = Depends(current_us
     meta = {"workflow": call["workflow"], "call_id": call_id, "run_id": run["id"], "status": call["status"], "started_at": call["started_at"], "ended_at": call["ended_at"],
             "system": f"{sys_['label']} ({sys_['sid']}, client {sys_['client']})" if sys_ else "", "requested_by": owner["username"] if owner else ""}
     await svc.audit.write("report.download", user["username"], run["id"], {"tool_call_id": call_id, "workflow": call["workflow"]})
-    return Response(build_report(meta, call_input if isinstance(call_input, dict) else {}, call["output"]),
+    return Response(build_report(call["workflow"], meta, call_input if isinstance(call_input, dict) else {}, call["output"]),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="sage-{call["workflow"].replace("_", "-")}-{call_id}.xlsx"'})
 
