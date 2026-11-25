@@ -6,6 +6,8 @@ __pycache__/
 .env
 node_modules/
 dist/
+*.log
+*.trc
 sage_api/vendor/nwrfcsdk/*
 !sage_api/vendor/nwrfcsdk/.gitkeep
 _references/

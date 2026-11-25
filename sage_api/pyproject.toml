@@ -17,7 +17,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = [
+    "cython>=3.3.2",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "setuptools>=84.2.1",
+]
 
 [build-system]
 requires = ["hatchling"]

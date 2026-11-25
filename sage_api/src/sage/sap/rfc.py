@@ -83,7 +83,17 @@ class _PyrfcClient:
 
 def pyrfc_connector(p: RfcParams) -> RfcClient:
     try:
+        import os
+        sdk_home = os.environ.get("SAPNWRFC_HOME")
+        if sdk_home:
+            lib_dir = os.path.join(sdk_home, "lib")
+            if hasattr(os, "add_dll_directory"):  # Windows ignores PATH for extension DLL search
+                os.add_dll_directory(lib_dir)
+            if lib_dir not in os.environ.get("PATH", ""):  # sapnwrfc.dll itself reads PATH for its ICU libs
+                os.environ["PATH"] = lib_dir + os.pathsep + os.environ.get("PATH", "")
         import pyrfc
+        if not hasattr(pyrfc, "Connection"):
+            raise ImportError("pyrfc's native _cyrfc extension failed to load (check SAPNWRFC_HOME/PATH)")
     except ImportError as e:
         raise RfcError("CONNECT", "pyrfc / SAP NW RFC SDK is not installed in this image") from e
     try:
