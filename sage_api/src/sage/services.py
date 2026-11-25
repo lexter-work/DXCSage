@@ -33,7 +33,10 @@ async def build_services(*, data_dir, key_dir, connector=None, providers=None, w
     async def load_params(system_id):
         return await holder.systems.load_params(system_id)
 
-    rfc = SapRfc(load_params, connector or pyrfc_connector, settings)
+    async def load_names(system_id):
+        return await holder.systems.abap_names(system_id)
+
+    rfc = SapRfc(load_params, connector or pyrfc_connector, settings, load_names)
     systems = SystemsService(db, box, audit, rfc)
     holder.systems = systems
     wf = workflows if workflows is not None else discover()

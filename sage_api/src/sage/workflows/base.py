@@ -40,9 +40,25 @@ class Workflow(ABC):
         return out
 
     @classmethod
+    def abap_objects(cls) -> list[tuple[str, str]]:
+        """(abap_object_id, kind) of every custom ABAP object this workflow needs. IDs are fixed; each system may name them differently."""
+        out: dict[str, str] = {}
+        for r in cls.requirements():
+            if r.kind in ("fm_exists", "fm_authorized"):
+                out.setdefault(r.key, "function_module")
+            if getattr(r, "group", ""):
+                out.setdefault(r.group, "function_group")
+        return list(out.items())
+
+    @classmethod
     async def setting_options(cls, key: str, task_ctx) -> list[str]:
         """Valid values for a binding setting whose SettingSpec has lookup=True. Read-only SAP reads only."""
         raise NotImplementedError(key)
 
     @abstractmethod
     async def run(self, ctx, data: BaseModel) -> BaseModel: ...
+
+
+def all_abap_objects(workflows) -> dict[str, str]:
+    """abap_object_id -> kind, across every workflow."""
+    return {oid: kind for wf in workflows.values() for oid, kind in wf.abap_objects()}

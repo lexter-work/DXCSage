@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 from sage.deps import admin_user, current_user
 from sage.systems import SystemsError
+from sage.workflows.base import all_abap_objects
 
 router = APIRouter(prefix="/api/systems")
 
@@ -65,6 +66,27 @@ async def update_system(system_id: int, body: SystemPatch, request: Request, adm
 async def credentials(system_id: int, body: Credentials, request: Request, admin: dict = Depends(admin_user)):
     await request.app.state.services.systems.set_credentials(system_id, body.user, body.password, admin["username"])
     return {"ok": True}
+
+
+class AbapName(BaseModel):
+    object_id: str
+    name: str
+
+
+@router.put("/{system_id}/abap-names")
+async def abap_name(system_id: int, body: AbapName, request: Request, admin: dict = Depends(admin_user)):
+    """Name a custom ABAP object the way this system does. Health is re-checked for the workflows set up here, so it matches the new name."""
+    svc = request.app.state.services
+    if not await svc.systems.get(system_id):
+        raise HTTPException(404, "not_found")
+    try:
+        await svc.systems.set_abap_name(system_id, body.object_id, body.name, admin["username"], all_abap_objects(svc.workflows))
+    except SystemsError as e:
+        raise HTTPException(400, str(e))
+    for wf in svc.workflows:
+        if any(b["system_id"] == system_id for b in await svc.setup.bindings(wf)):
+            await svc.health.check(system_id, wf, admin["username"])
+    return {"ok": True, "names": await svc.systems.abap_names(system_id)}
 
 
 @router.post("/{system_id}/status")

@@ -97,8 +97,9 @@ def pyrfc_connector(p: RfcParams) -> RfcClient:
 
 class SapRfc:
     def __init__(self, load_params: Callable[[int], Awaitable[RfcParams]],
-                 connector: Callable[[RfcParams], RfcClient], settings):
-        self._load, self._connector, self._settings = load_params, connector, settings
+                 connector: Callable[[RfcParams], RfcClient], settings,
+                 load_names: Callable[[int], Awaitable[dict[str, str]]] | None = None):
+        self._load, self._connector, self._settings, self._names = load_params, connector, settings, load_names
         self._clients: dict[int, RfcClient] = {}
         self._locks: dict[int, asyncio.Lock] = {}
 
@@ -111,6 +112,9 @@ class SapRfc:
                 pass
 
     async def call(self, system_id: int, fm: str, **params) -> dict:
+        # fm is an abap_object_id; a system with its own naming convention maps it to its own name.
+        if self._names:
+            fm = (await self._names(system_id)).get(fm, fm)
         async with self._locks.setdefault(system_id, asyncio.Lock()):
             for attempt in (0, 1):
                 client = self._clients.get(system_id)

@@ -1,10 +1,14 @@
 """Registered SAP systems. Admin-only; never deleted, only disabled."""
+import re
+
 from cryptography.fernet import InvalidToken
 
 from sage.sap.rfc import RfcError, RfcParams
 from sage.util import iso
 
 _PUBLIC = "id,label,sid,description,ashost,sysnr,client,rfc_user,status,created_at,updated_at"
+# Function modules and groups: optional /NAMESPACE/ prefix, then letters, digits and underscores; at most 30 characters.
+_ABAP_NAME = re.compile(r"^(/[A-Z0-9]{1,10}/)?[A-Z][A-Z0-9_]*$")
 _FIELDS = ("label", "sid", "description", "ashost", "sysnr", "client", "rfc_user")
 
 
@@ -70,6 +74,31 @@ class SystemsService:
                                (user, self._box.encrypt(password), iso(), system_id))
         self._rfc.drop(system_id)
         await self._audit.write("system.credentials", actor, detail={"system_id": system_id, "rfc_user": user})
+
+    async def abap_names(self, system_id) -> dict[str, str]:
+        rows = await self._db.fetchall("SELECT abap_object_id, name FROM abap_names WHERE system_id=?", (system_id,))
+        return {r["abap_object_id"]: r["name"] for r in rows}
+
+    async def set_abap_name(self, system_id, object_id, name, actor, known: dict[str, str]):
+        """Give the object this system's own name. Using its ID again removes the override. `known` = all valid IDs."""
+        name = name.strip().upper()
+        if object_id not in known:
+            raise SystemsError("unknown_object")
+        if len(name) > 30 or not _ABAP_NAME.fullmatch(name):
+            raise SystemsError("bad_abap_name")
+        current = await self.abap_names(system_id)
+        effective = {oid: current.get(oid, oid) for oid in known}
+        effective[object_id] = name
+        if len(set(effective.values())) < len(effective):
+            raise SystemsError("name_in_use")
+        if name == object_id:
+            await self._db.execute("DELETE FROM abap_names WHERE system_id=? AND abap_object_id=?", (system_id, object_id))
+        else:
+            await self._db.execute(
+                "INSERT INTO abap_names(system_id,abap_object_id,name,updated_by,updated_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(system_id,abap_object_id) DO UPDATE SET name=excluded.name, updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+                (system_id, object_id, name, actor, iso()))
+        await self._audit.write("system.abap_name", actor, detail={"system_id": system_id, "abap_object_id": object_id, "name": name})
 
     async def set_status(self, system_id, status, actor):
         if status not in ("inactive", "active", "disabled"):

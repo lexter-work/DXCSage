@@ -1,7 +1,7 @@
 """What a task or workflow needs from a SAP system. Checks are read-only: they never call a
 write or job-scheduling function module. A pass proves existence and authorization, not that it works."""
 import fnmatch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ class CheckEnv:
     binding: dict
     settings: Any
     ping_error: RfcError | None = None
+    names: dict[str, str] = field(default_factory=dict)   # abap_object_id -> this system's name
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class Requirement:
     async def check(self, env: CheckEnv) -> CheckResult:
         raise NotImplementedError
 
-    def auth_rows(self) -> list[tuple[str, str, str]]:
+    def auth_rows(self, names: dict[str, str] | None = None) -> list[tuple[str, str, str]]:
         return []
 
     def title(self) -> str:
@@ -69,12 +70,13 @@ class FmExists(Requirement):
 
     async def check(self, env):
         try:
-            r = await env.rfc.read_table(env.system_id, "TFDIR", ["FUNCNAME"], f"FUNCNAME = '{self.key}'", rows=1)
+            name = env.names.get(self.key, self.key)
+            r = await env.rfc.read_table(env.system_id, "TFDIR", ["FUNCNAME"], f"FUNCNAME = '{name}'", rows=1)
         except RfcError as e:
             return CheckResult(status="fail", message=f"cannot read TFDIR: {e.message}")
         return CheckResult(status="pass") if r.rows else CheckResult(status="fail", message="function module not found")
 
-    def auth_rows(self):
+    def auth_rows(self, names=None):
         return [("S_TABU_NAM", "TABLE", "TFDIR"), ("S_TABU_NAM", "ACTVT", "03")]
 
 
@@ -96,14 +98,16 @@ class FmAuthorized(Requirement):
         def allows(field_, wanted):
             return any(fnmatch.fnmatchcase(wanted, p) for p in vals.get(field_, []))
 
-        names = [self.key] + ([self.group] if self.group else [])
-        ok = allows("RFC_TYPE", "FUNC") and any(allows("RFC_NAME", n) for n in names) and allows("ACTVT", "16")
+        fm = env.names.get(self.key, self.key)
+        candidates = [fm] + ([env.names.get(self.group, self.group)] if self.group else [])
+        ok = allows("RFC_TYPE", "FUNC") and any(allows("RFC_NAME", n) for n in candidates) and allows("ACTVT", "16")
         return CheckResult(status="pass") if ok else CheckResult(
-            status="fail", message=f"S_RFC does not cover FUNC {self.key} with ACTVT 16 (heuristic check)")
+            status="fail", message=f"S_RFC does not cover FUNC {fm} with ACTVT 16 (heuristic check)")
 
-    def auth_rows(self):
-        rows = [("S_RFC", "RFC_TYPE", "FUNC"), ("S_RFC", "RFC_NAME", self.key), ("S_RFC", "ACTVT", "16")]
-        return rows + ([("S_RFC", "RFC_NAME", self.group)] if self.group else [])
+    def auth_rows(self, names=None):
+        n = names or {}
+        rows = [("S_RFC", "RFC_TYPE", "FUNC"), ("S_RFC", "RFC_NAME", n.get(self.key, self.key)), ("S_RFC", "ACTVT", "16")]
+        return rows + ([("S_RFC", "RFC_NAME", n.get(self.group, self.group))] if self.group else [])
 
 
 @dataclass(frozen=True)
@@ -117,7 +121,7 @@ class TableReadable(Requirement):
             return CheckResult(status="fail", message=f"{e.code}: {e.message}")
         return CheckResult(status="pass")
 
-    def auth_rows(self):
+    def auth_rows(self, names=None):
         return [("S_TABU_NAM", "TABLE", self.key), ("S_TABU_NAM", "ACTVT", "03")]
 
 

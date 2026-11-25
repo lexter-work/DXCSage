@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS system_health(
   id INTEGER PRIMARY KEY, system_id INTEGER NOT NULL REFERENCES systems(id), workflow TEXT NOT NULL,
   req_kind TEXT NOT NULL, req_key TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL,
   checked_at TEXT NOT NULL, UNIQUE(system_id, workflow, req_kind, req_key));
+CREATE TABLE IF NOT EXISTS abap_names(
+  system_id INTEGER NOT NULL REFERENCES systems(id), abap_object_id TEXT NOT NULL, name TEXT NOT NULL,
+  updated_by TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(system_id, abap_object_id), UNIQUE(system_id, name));
 CREATE TABLE IF NOT EXISTS workflow_systems(
   id INTEGER PRIMARY KEY, workflow TEXT NOT NULL, system_id INTEGER NOT NULL REFERENCES systems(id),
   status TEXT NOT NULL CHECK(status IN ('setup','enabled','disabled')),

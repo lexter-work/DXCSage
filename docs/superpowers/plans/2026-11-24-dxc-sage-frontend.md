@@ -4,7 +4,7 @@
 
 **Goal:** Build `sage_web`, the Vue 3 frontend of DXC Sage: login, streaming chat with workflow cards, usage, and the admin pages (users, systems, workflows with setup guide, health matrix, settings, runs, audit, usage).
 
-**Architecture:** Single-page app talking only to `sage_api` through relative URLs (`api/...`, hash routing), so it works behind ServiceHub's `/s/<id>/` proxy. Styled with the `moss-console-frontend` skill (warm neutral, moss green, Light/Dark/System). Admin actions open in a drawer; only the chat-delete confirmation is a modal. The chat view is rebuilt from stored messages plus replayed run events, so a reload or reconnect shows a still-running or waiting run.
+**Architecture:** Single-page app talking only to `sage_api` through relative URLs (`api/...`, hash routing), so it works behind ServiceHub's `/s/<id>/` proxy. Styled with the `grey-console-frontend` skill (neutral grey, ember orange accent, Light/Dark/System). Admin actions open in a drawer; only the chat-delete confirmation is a modal. The chat view is rebuilt from stored messages plus replayed run events, so a reload or reconnect shows a still-running or waiting run.
 
 **Tech Stack:** Vue 3 (`<script setup lang="ts">`), vue-router 4, Vite 5, TypeScript, vue-tsc, vitest, pnpm; nginx for the container.
 
@@ -14,7 +14,7 @@
 
 - Use `pnpm` (never npm). Project root `Applications/DXCSage/sage_web/`. Dev port 29701; proxy `/api` to `http://localhost:29700`.
 - Relative URLs only: write `api/chats`, never `/api/chats`. `base: './'` in Vite. Hash router (`createWebHashHistory`).
-- Style from `.agents/skills/moss-console-frontend/` (`references/base.css` copied in unchanged). Colors only through its tokens. No gradients, no glow. Sentence case. No corporate logos or colors; the app name text "DXC Sage" is fine.
+- Style from `.agents/skills/grey-console-frontend/` (`references/base.css` copied in unchanged). Colors only through its tokens. No gradients, no glow. Sentence case. No corporate logos or colors; the app name text "DXC Sage" is fine.
 - No reduced-motion handling, no `prefers-reduced-motion` query.
 - Drawers for admin interactions; `ConfirmModal` only for deleting a chat.
 - Secrets are write-only: never display a password or API key; show "set" or "not set".
@@ -27,9 +27,10 @@
 sage_web/
   package.json tsconfig.json vite.config.ts index.html Dockerfile nginx.conf
   src/
-    main.ts App.vue router.ts api.ts session.ts theme.ts toast.ts messages.ts messages.test.ts
-    styles/{moss.css,app.css}
-    components/{Drawer.vue,ConfirmModal.vue,StatusPill.vue,DataTable.vue}
+    main.ts App.vue router.ts api.ts session.ts theme.ts toast.ts layout.ts messages.ts messages.test.ts
+    styles/{base.css,app.css}
+    components/{Drawer.vue,ConfirmModal.vue,StatusPill.vue,DataTable.vue,Icon.vue}
+    assets/dxc-logo.png
     pages/{Login.vue,Account.vue,Chat.vue,MyUsage.vue}
     pages/admin/{Users.vue,Systems.vue,Workflows.vue,WorkflowSetup.vue,Health.vue,Settings.vue,Runs.vue,Audit.vue,Usage.vue}
 ```
@@ -103,7 +104,7 @@ Copy the style base (PowerShell):
 ```powershell
 cd D:\User\Documents\Programming\Applications\DXCSage\sage_web
 New-Item -ItemType Directory -Force src\styles | Out-Null
-Copy-Item ..\..\..\.agents\skills\moss-console-frontend\references\base.css src\styles\moss.css
+Copy-Item ..\..\..\.agents\skills\grey-console-frontend\references\base.css src\stylesase.css
 ```
 
 `src/styles/app.css` (additions on top of the skill's `base.css`; tokens only):
@@ -124,10 +125,6 @@ Copy-Item ..\..\..\.agents\skills\moss-console-frontend\references\base.css src\
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
 .login .card { width: min(380px, 100%); }
-.chat-wrap { display: grid; grid-template-columns: 250px 1fr; gap: 16px; min-height: 70vh; }
-.chat-list { display: grid; gap: 4px; align-content: start; }
-.chat-list button { text-align: left; padding: 8px 10px; border-radius: var(--r-sm); border: 0; background: none; cursor: pointer; color: var(--ink-2); }
-.chat-list button.sel { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
 .chat-main { display: flex; flex-direction: column; gap: 12px; }
 .msgs { display: grid; gap: 10px; align-content: start; min-height: 40vh; }
 .bubble { padding: 10px 12px; border-radius: var(--r-md); white-space: pre-wrap; max-width: 80ch; }
@@ -136,7 +133,7 @@ Copy-Item ..\..\..\.agents\skills\moss-console-frontend\references\base.css src\
 .toolcard { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 10px 12px; max-width: 80ch; }
 .toolcard pre, pre.out { background: var(--sunken); padding: 8px 10px; border-radius: var(--r-sm); overflow: auto; font: 12px/1.45 var(--mono); margin: 6px 0 0; white-space: pre-wrap; }
 .matrix td, .matrix th { text-align: center; }
-@media (max-width: 760px) { .chat-wrap { grid-template-columns: 1fr; } .page { padding: 16px 16px 40px; } }
+@media (max-width: 760px) { .page { padding: 16px 16px 40px; } }
 ```
 
 - [ ] **Step 2: Write core modules**
@@ -266,10 +263,12 @@ import { router } from './router'
 import { setUnauthorizedHandler } from './api'
 import { session } from './session'
 import { initTheme } from './theme'
-import './styles/moss.css'
+import { initShortcuts } from './layout'
+import './styles/base.css'
 import './styles/app.css'
 
 initTheme()
+initShortcuts()
 setUnauthorizedHandler(() => { session.user = null; router.push('/login') })
 createApp(App).use(router).mount('#app')
 ```
@@ -351,56 +350,195 @@ defineEmits<{ select: [row: any] }>()
 </template>
 ```
 
+- [ ] **Step 3b: Shell state, icons and sidebar CSS**
+
+`src/layout.ts`:
+```ts
+import { reactive } from 'vue'
+
+// Remembered per browser; the app works when storage is blocked.
+const store = {
+  get(k: string) { try { return localStorage.getItem(k) } catch { return null } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v) } catch { /* keep in memory */ } },
+}
+
+export const layout = reactive({
+  navCollapsed: store.get('sage.navCollapsed') === '1',
+  threadsCollapsed: store.get('sage.threadsCollapsed') === '1',
+})
+
+export function toggleNav() { layout.navCollapsed = !layout.navCollapsed; store.set('sage.navCollapsed', layout.navCollapsed ? '1' : '0') }
+export function setThreadsCollapsed(c: boolean) { layout.threadsCollapsed = c; store.set('sage.threadsCollapsed', c ? '1' : '0') }
+export function toggleThreads() { setThreadsCollapsed(!layout.threadsCollapsed) }
+
+/** Ctrl+B toggles the main menu, Ctrl+Shift+B the chat list. */
+export function initShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault()
+      e.shiftKey ? toggleThreads() : toggleNav()
+    }
+  })
+}
+```
+`main.ts` calls `initShortcuts()` after `initTheme()`.
+
+`src/components/Icon.vue` (outline icons, one stroke weight; names used: chat, usage, systems, workflows, health, runs, audit, users, settings, account, logout, collapse, expand, plus, close, check, alert, chev, help, trash):
+```vue
+<script setup lang="ts">
+// Drawn outline icons, one stroke weight (set in .i). Static strings only, so v-html is safe here.
+const P: Record<string, string> = {
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  usage: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  systems: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  workflows: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H15a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6.5"/>',
+  health: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  runs: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  audit: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 13.7H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10.3 3V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  logout: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',
+  collapse: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M16 15l-3-3 3-3"/>',
+  expand: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M14 9l3 3-3 3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  alert: '<path d="M12 7v6M12 17h.01"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.6a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.5M12 17h.01"/>',
+  trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+}
+defineProps<{ name: string }>()
+</script>
+<template><svg class="i" viewBox="0 0 24 24" aria-hidden="true" v-html="P[name]" /></template>
+```
+Add `.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}` to `app.css`. Put the DXC logo at `src/assets/dxc-logo.png` (bundled, no remote image).
+
+Add the shell CSS to `app.css` (tokens only; `--header`, `--header-line`, `--canvas` are the top-bar tokens, grey in both themes). The built `sage_web/src/styles/dxc.css` holds the full version:
+```css
+.bar{height:56px;display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--header);color:var(--canvas);border-bottom:1px solid var(--header-line);position:sticky;top:0;z-index:20}
+.shell{display:grid;grid-template-columns:auto minmax(0,1fr);min-height:calc(100vh - 56px)}
+nav.side{width:216px;position:sticky;top:56px;height:calc(100vh - 56px);align-self:start;overflow:hidden auto;white-space:nowrap;border-right:1px solid var(--line);background:var(--panel);padding:16px 10px;display:flex;flex-direction:column;gap:2px}
+.shell.navc nav.side{width:60px;padding-left:8px;padding-right:8px}
+.shell.navc .nl,.shell.navc .count{display:none}
+.shell.navc .nav{justify-content:center;padding:8px 0}
+.side .foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px}
+.nav{position:relative}
+.nav[aria-current="page"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.nav[aria-current="page"]::before{content:"";position:absolute;left:-10px;top:6px;bottom:6px;width:3px;background:var(--accent);border-radius:0 2px 2px 0}
+.iconbtn{width:30px;height:30px;display:grid;place-items:center;border:1px solid transparent;border-radius:4px;background:none;cursor:pointer;color:var(--ink-2);flex:none}
+.chat{display:grid;grid-template-columns:var(--th-w,296px) minmax(0,1fr);height:calc(100vh - 56px)}
+.chat.thc{--th-w:56px}
+.threads{display:flex;flex-direction:column;min-width:0;overflow:hidden;border-right:1px solid var(--line);background:var(--bg)}
+.thbar{display:flex;align-items:center;gap:8px;padding:12px 12px 0 16px}
+.thbar .ttl{font-weight:600;font-size:13px;margin-right:auto;white-space:nowrap}
+.rail{display:none;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.rail .rt{width:36px;height:30px;display:grid;place-items:center;border:0;border-radius:4px;background:none;cursor:pointer}
+.rail .rt[aria-current="true"]{background:var(--panel);box-shadow:inset 3px 0 0 var(--accent)}
+.chat.thc .top,.chat.thc .tlist,.chat.thc .thbar .ttl{display:none}
+.chat.thc .thbar{justify-content:center;padding:12px 0 0}
+.chat.thc .rail{display:flex}
+.chatsbtn,.thclose,.thscrim{display:none}
+@media (max-width:1000px){
+  .shell,.shell.navc{grid-template-columns:60px minmax(0,1fr)}
+  nav.side,.shell.navc nav.side{width:60px;padding:16px 8px}
+  nav.side .nl,nav.side .count{display:none}
+  nav.side .nav{justify-content:center;padding:8px 0}
+  .navtg,.thtg{display:none}
+  .chat{grid-template-columns:minmax(0,1fr)}
+  .threads{position:fixed;top:56px;left:0;bottom:0;width:min(320px,86vw);z-index:36;transform:translateX(-100%);visibility:hidden}
+  .chat.thopen .threads{transform:none;visibility:visible}
+  .chat.thopen .thscrim{display:block;position:fixed;inset:56px 0 0 0;background:rgb(0 0 0 / .5);z-index:35}
+  .chatsbtn,.thclose{display:inline-flex}
+  .chat.thc .top,.chat.thc .tlist{display:block}
+  .chat.thc .rail{display:none}
+}
+```
+
 - [ ] **Step 4: Write the shell and auth pages**
 
 `src/App.vue`:
 ```vue
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { post } from './api'
 import { session } from './session'
 import { toastState } from './toast'
 import { getMode, setMode } from './theme'
-import { ref } from 'vue'
+import { layout, toggleNav } from './layout'
+import Icon from './components/Icon.vue'
+import logo from './assets/dxc-logo.png'
 
 const route = useRoute(), router = useRouter()
-const bare = computed(() => !session.user || route.path === '/login')
+const modes = ['light', 'dark', 'system'] as const
 const mode = ref(getMode())
-const pick = (m: 'light' | 'dark' | 'system') => { mode.value = m; setMode(m) }
+const pick = (m: (typeof modes)[number]) => { mode.value = m; setMode(m) }
 async function logout() { await post('api/auth/logout'); session.user = null; router.push('/login') }
-const adminLinks = [
-  ['/admin/systems', 'Systems'], ['/admin/workflows', 'Workflows'], ['/admin/health', 'Health'], ['/admin/runs', 'Runs'],
-  ['/admin/audit', 'Audit'], ['/admin/usage', 'Usage (all)'], ['/admin/users', 'Users'], ['/admin/settings', 'Settings'],
+
+const work = [['/chat', 'Chat', 'chat'], ['/usage', 'My usage', 'usage']]
+const admin = [
+  ['/admin/systems', 'Systems', 'systems'], ['/admin/workflows', 'Workflows', 'workflows'], ['/admin/health', 'Health', 'health'],
+  ['/admin/runs', 'Runs', 'runs'], ['/admin/usage', 'Usage (all)', 'usage'], ['/admin/audit', 'Audit', 'audit'],
+  ['/admin/users', 'Users', 'users'], ['/admin/settings', 'Settings', 'settings'],
 ]
+const here = (to: string) => route.path === to || route.path.startsWith(to + '/')
+const crumb = computed(() => {
+  const all = [...work.map(w => ['Work', w[0], w[1]]), ...admin.map(a => ['Admin', a[0], a[1]])]
+  const hit = all.find(([, to]) => here(to))
+  if (hit) return [hit[0], hit[2], ...(route.path.startsWith('/admin/workflows/') ? ['Setup guide'] : [])]
+  return route.path === '/account' ? ['Account'] : []
+})
+const initials = computed(() => (session.user?.username ?? '').slice(0, 2).toUpperCase())
+const bare = computed(() => !session.user)
 </script>
 
 <template>
+  <header class="bar">
+    <img class="logo" :src="logo" alt="DXC Technology">
+    <span class="div" aria-hidden="true" />
+    <span class="product">Sage</span>
+    <span v-if="!bare" class="ctx"><template v-for="(c, i) in crumb" :key="i"><span v-if="i">·</span><b v-if="i === crumb.length - 1">{{ c }}</b><span v-else>{{ c }}</span></template></span>
+    <span class="sp" />
+    <div class="seg" role="group" aria-label="Theme">
+      <button v-for="m in modes" :key="m" :aria-pressed="mode === m" @click="pick(m)">{{ m.charAt(0).toUpperCase() + m.slice(1) }}</button>
+    </div>
+    <div v-if="!bare" class="who"><span class="avatar" aria-hidden="true">{{ initials }}</span><span class="nm">{{ session.user?.username }}<small>{{ session.user?.role === 'admin' ? 'Admin' : 'User' }}</small></span></div>
+  </header>
+
   <router-view v-if="bare" />
-  <div v-else class="app">
-    <aside>
-      <div class="brand"><div class="brand-mark">S</div><div><b>DXC Sage</b><small>{{ session.user?.username }}</small></div></div>
-      <div class="nav-label">Work</div>
-      <router-link class="nav" to="/chat"><span class="nl">Chat</span></router-link>
-      <router-link class="nav" to="/usage"><span class="nl">My usage</span></router-link>
+  <div v-else class="shell" :class="{ navc: layout.navCollapsed }">
+    <nav id="sidenav" class="side" aria-label="Main">
+      <div class="nlabel">Work</div>
+      <a v-for="[to, label, icon] in work" :key="to" class="nav" :href="'#' + to" :title="label"
+         :aria-current="here(to) ? 'page' : undefined" @click.prevent="router.push(to)"><Icon :name="icon" /><span class="nl">{{ label }}</span></a>
       <template v-if="session.user?.role === 'admin'">
-        <div class="nav-label">Admin</div>
-        <router-link v-for="[to, label] in adminLinks" :key="to" class="nav" :to="to"><span class="nl">{{ label }}</span></router-link>
+        <div class="nlabel">Admin</div>
+        <a v-for="[to, label, icon] in admin" :key="to" class="nav" :href="'#' + to" :title="label"
+           :aria-current="here(to) ? 'page' : undefined" @click.prevent="router.push(to)"><Icon :name="icon" /><span class="nl">{{ label }}</span></a>
       </template>
-      <div class="side-foot">
-        <div class="seg" role="group" aria-label="Theme">
-          <button v-for="m in ['light', 'dark', 'system'] as const" :key="m" :aria-pressed="mode === m" @click="pick(m)">{{ m }}</button>
-        </div>
-        <router-link class="nav" to="/account"><span class="nl">Account</span></router-link>
-        <button class="nav" @click="logout"><span class="nl">Sign out</span></button>
+      <div class="foot">
+        <button class="nav tg navtg" :aria-expanded="!layout.navCollapsed" aria-controls="sidenav"
+                :title="layout.navCollapsed ? 'Expand menu (Ctrl+B)' : 'Collapse menu (Ctrl+B)'" @click="toggleNav">
+          <Icon :name="layout.navCollapsed ? 'expand' : 'collapse'" /><span class="nl">{{ layout.navCollapsed ? 'Expand menu' : 'Collapse menu' }}</span>
+        </button>
+        <a class="nav" href="#/account" title="Account" :aria-current="route.path === '/account' ? 'page' : undefined"
+           @click.prevent="router.push('/account')"><Icon name="account" /><span class="nl">Account</span></a>
+        <button class="nav" title="Sign out" @click="logout"><Icon name="logout" /><span class="nl">Sign out</span></button>
       </div>
-    </aside>
+    </nav>
     <main><router-view /></main>
   </div>
   <div class="toast" :class="{ show: toastState.show }" role="status">{{ toastState.text }}</div>
 </template>
 ```
-Check while writing the sidebar: `base.css` styles `.nav` for `button` and `router-link` renders `<a class="nav router-link-active">`; if the active state class in `base.css` is `.nav.active`, add `.nav.router-link-active { background: var(--accent-soft); color: var(--ink); font-weight: 600; }` to `app.css`. Verify with `grep -n "\.nav" src/styles/moss.css`.
+**Shell rules (both sidebars are required):**
+- 56px top bar (`.bar`): logo, divider, product name, breadcrumb, theme switch, user.
+- Main menu (`nav.side`): 216px with labels, or a 60px icon-only strip (`.shell.navc`). Collapse button at the bottom and **Ctrl+B**. State remembered (`layout.ts`). Every item has an icon and a `title` tooltip.
+- Chat list (Chat page, `.threads`): 296px, or a 56px rail with a "+" button and one status dot per chat (`.chat.thc`). Collapse button in its header and **Ctrl+Shift+B**. State remembered.
+- 1000px and below: the main menu stays a **60px icon-only left sidebar** (no tab row, no expand control, labels only as tooltips). The chat list becomes a 320px slide-in drawer opened by a "Chats" button, with scrim, Esc to close, and focus moved in and back.
+- No blue surfaces: grey panels; blue only for text, icons, the active-item bar and focus rings.
 
 `src/pages/Login.vue`:
 ```vue
@@ -590,13 +728,17 @@ export function applyEvent(items: Item[], ev: { type: string; data: any }): void
 - [ ] **Step 5: Chat page** — `src/pages/Chat.vue`:
 ```vue
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { del, get, patch, post } from '../api'
 import { applyEvent, buildItems, type Item, type Msg } from '../messages'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import StatusPill from '../components/StatusPill.vue'
 import { toast } from '../toast'
+import Icon from '../components/Icon.vue'
+import { layout, toggleThreads, setThreadsCollapsed } from '../layout'
 
+const thopen = ref(false), small = window.matchMedia('(max-width: 1000px)')
+const listEl = ref<HTMLElement | null>(null), openBtn = ref<HTMLElement | null>(null)
 const chats = ref<any[]>([]), current = ref<any | null>(null), items = ref<Item[]>([])
 const providers = ref<Record<string, string[]>>({}), provider = ref(''), model = ref('')
 const text = ref(''), activeRun = ref<number | null>(null), resumeAt = ref<string | null>(null)
@@ -673,26 +815,52 @@ onMounted(async () => {
   await loadChats()
   if (chats.value[0]) await select(chats.value[0])
 })
-onBeforeUnmount(closeStream)
+watch(thopen, async (o) => {
+  if (o) { await nextTick(); (listEl.value?.querySelector<HTMLElement>('.thread[aria-current="true"]') ?? listEl.value?.querySelector<HTMLElement>('.thclose'))?.focus() }
+  else if (small.matches) openBtn.value?.focus()
+})
+const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape' && thopen.value) thopen.value = false }
+const onSmall = () => { if (!small.matches) thopen.value = false }
+onMounted(() => { window.addEventListener('keydown', onEsc); small.addEventListener('change', onSmall) })
+onBeforeUnmount(() => { closeStream(); window.removeEventListener('keydown', onEsc); small.removeEventListener('change', onSmall) })
 </script>
 
 <template>
-  <section class="page">
-    <div class="page-head"><div><h1>Chat</h1><p>Ask for SAP work. Workflows run on the systems an admin has set up.</p></div></div>
-    <div v-if="!Object.keys(providers).length" class="callout"><b>No provider is configured.</b><span>An admin must set an API key under Settings.</span></div>
-    <div class="chat-wrap">
-      <div class="card"><div class="card-b chat-list">
+  <section class="chat" :class="{ thc: layout.threadsCollapsed, thopen }">
+    <div class="thscrim" @click="thopen = false" />
+    <aside id="threads" ref="listEl" class="threads" :role="thopen ? 'dialog' : undefined" :aria-modal="thopen ? 'true' : undefined" aria-label="Chats">
+      <div class="thbar">
+        <span class="ttl">Chats</span>
+        <button class="iconbtn thclose" aria-label="Close chat list" title="Close chat list" @click="thopen = false"><Icon name="close" /></button>
+        <button class="iconbtn thtg" :aria-expanded="!layout.threadsCollapsed" aria-controls="threads"
+                :title="layout.threadsCollapsed ? 'Expand chat list (Ctrl+Shift+B)' : 'Collapse chat list (Ctrl+Shift+B)'"
+                :aria-label="layout.threadsCollapsed ? 'Expand chat list' : 'Collapse chat list'" @click="toggleThreads">
+          <Icon :name="layout.threadsCollapsed ? 'expand' : 'collapse'" /></button>
+      </div>
+      <div class="rail">
+        <button class="iconbtn" title="New chat" aria-label="New chat" @click="setThreadsCollapsed(false)"><Icon name="plus" /></button>
+        <button v-for="c in chats" :key="c.id" class="rt" :title="c.title" :aria-label="c.title"
+                :aria-current="current?.id === c.id ? 'true' : undefined" @click="select(c)"><span class="dot" :class="c.last_run_status" /></button>
+      </div>
+      <div class="top">
         <div class="row">
-          <select class="field" v-model="provider" @change="model = providers[provider]?.[0] ?? ''"><option v-for="(_, p) in providers" :key="p">{{ p }}</option></select>
-          <select class="field" v-model="model"><option v-for="m in providers[provider] ?? []" :key="m">{{ m }}</option></select>
-          <button class="btn primary" @click="newChat">New chat</button>
+          <select class="field" v-model="provider" aria-label="Provider" @change="model = providers[provider]?.[0] ?? ''"><option v-for="(_, p) in providers" :key="p">{{ p }}</option></select>
+          <select class="field" v-model="model" aria-label="Model"><option v-for="m in providers[provider] ?? []" :key="m">{{ m }}</option></select>
         </div>
+        <button class="btn primary" @click="newChat"><Icon name="plus" />New chat</button>
+      </div>
+      <div class="tlist">
         <div v-for="c in chats" :key="c.id" class="row">
-          <button :class="{ sel: current?.id === c.id }" style="flex:1" @click="select(c)">{{ c.title }}</button>
-          <button class="btn ghost sm" :aria-label="`Delete chat ${c.title}`" @click="confirmDel = c">Delete</button>
+          <button class="thread" style="flex:1" :aria-current="current?.id === c.id ? 'true' : undefined" @click="select(c); thopen = false"><b>{{ c.title }}</b><span class="dot" :class="c.last_run_status" /></button>
+          <button class="iconbtn" :aria-label="`Delete chat ${c.title}`" title="Delete chat" @click="confirmDel = c"><Icon name="trash" /></button>
         </div>
-      </div></div>
+        <p v-if="!chats.length" class="muted">No chats yet.</p>
+      </div>
+    </aside>
 
+    <div class="conv">
+      <div v-if="!Object.keys(providers).length" class="callout"><b>No provider is configured.</b><span>An admin must set an API key under Settings.</span></div>
+      <button ref="openBtn" class="btn sm chatsbtn" aria-controls="threads" :aria-expanded="thopen" @click="thopen = true">Chats</button>
       <div class="chat-main" v-if="current">
         <div class="row">
           <select class="field" style="width:auto" v-model="current.provider" @change="current.model = providers[current.provider]?.[0] ?? current.model; changeModel()">
@@ -1159,7 +1327,7 @@ onMounted(async () => (rows.value = (await get<any[]>('api/usage')).map(r => ({ 
 - [ ] **Step 6: Type check and build, once**
 
 Run: `cd sage_web; pnpm build`
-Expected: `vue-tsc` passes and `vite build` writes `dist/`. Fix only errors in files from this plan. If `.nav.router-link-active` is not styled by `moss.css`, add the rule from Task 1 Step 4 to `app.css`.
+Expected: `vue-tsc` passes and `vite build` writes `dist/`. Fix only errors in files from this plan. If `.nav.router-link-active` is not styled by `base.css`, add the rule from Task 1 Step 4 to `app.css`.
 
 ---
 
@@ -1267,4 +1435,5 @@ git commit -m "feat: DXC Sage frontend (chat, admin pages, setup guide, health m
 - My usage and all-users usage (counts only): Tasks 2, 3.
 - Admin: Users, Systems (register with RFC account, test, rotate credentials, disable), Workflows (set up per system, guide with live status, per-system settings, enable/disable), Health matrix with re-check, Settings (secrets write-only), Runs (including deleted chats, steps), Audit (filter, export, verify): Task 3.
 - Relative URLs and hash routing for ServiceHub, `/health` on nginx: Tasks 1, 4. Drawers for admin, modal only for chat delete: Tasks 1, 3, 2.
+- Shell: 56px top bar, collapsible main menu (Ctrl+B) and chat list (Ctrl+Shift+B), 60px icon-only sidebar and chat drawer at 1000px and below: Task 1 Step 3b, Task 2 Step 5.
 - Not built: write-confirmation, SSO, email watchers, Docker build run, browser smoke (optional).

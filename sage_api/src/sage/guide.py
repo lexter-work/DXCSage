@@ -17,25 +17,35 @@ def load_source(name: str) -> str:
     return (_RFC_DIR / name).read_text(encoding="utf-8", errors="replace")
 
 
-def build_guide(wf_cls, system: dict, rows: list[dict] | None) -> dict:
+def build_guide(wf_cls, system: dict, rows: list[dict] | None, names: dict[str, str] | None = None) -> dict:
+    names = {k: v for k, v in (names or {}).items() if k != v}
+    ids = sorted(names, key=len, reverse=True)
+
+    def sub(t):  # setup text and ABAP source are written with the IDs; show this system's names instead
+        for oid in ids:
+            t = t.replace(oid, names[oid])
+        return t
+
     status = {(r["req_kind"], r["req_key"]): r for r in rows or []}
     steps, auth, seen = [], [], set()
     for r in wf_cls.requirements():
         res = status.get((r.kind, r.key))
         steps.append({
-            "kind": r.kind, "key": r.key, "title": r.title(),
-            "text": (r.guide or _DEFAULT_GUIDE.get(r.kind, "")).replace("{sid}", system["sid"]).replace(
-                "{client}", system["client"]).replace("{user}", system["rfc_user"]),
-            "source": r.source, "source_text": load_source(r.source) if r.source else None,
+            "kind": r.kind, "key": r.key, "name": names.get(r.key, r.key),
+            "title": sub(r.title()) + (f" (ID {r.key})" if r.key in names else ""),
+            "text": sub((r.guide or _DEFAULT_GUIDE.get(r.kind, "")).replace("{sid}", system["sid"]).replace(
+                "{client}", system["client"]).replace("{user}", system["rfc_user"])),
+            "source": r.source, "source_text": sub(load_source(r.source)) if r.source else None,
             "status": res["status"] if res else None, "message": res["message"] if res else "",
         })
-        for row in r.auth_rows():
+        for row in r.auth_rows(names):
             if row not in seen:
                 seen.add(row)
                 auth.append(list(row))
     return {"workflow": wf_cls.name, "description": wf_cls.description,
             "system": {k: system[k] for k in ("label", "sid", "client", "rfc_user")},
-            "steps": steps, "auth_table": auth}
+            "steps": steps, "auth_table": auth,
+            "abap_objects": [{"object_id": oid, "kind": kind, "name": names.get(oid, oid)} for oid, kind in wf_cls.abap_objects()]}
 
 
 def guide_markdown(g: dict) -> str:

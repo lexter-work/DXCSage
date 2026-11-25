@@ -22,7 +22,7 @@ class HealthService:
             await self._rfc.ping(system_id)
         except RfcError as e:
             ping_error = e
-        env = CheckEnv(self._rfc, system_id, system["rfc_user"], binding, self._settings, ping_error)
+        env = CheckEnv(self._rfc, system_id, system["rfc_user"], binding, self._settings, ping_error, await self._systems.abap_names(system_id))
         reqs = self._workflows[workflow].requirements()
         now, out = iso(self._clock()), []
         blocked = ping_error is not None

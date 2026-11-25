@@ -26,7 +26,7 @@ Small agentic harness, a simplified rebuild of Citadel. Providers: Claude and GP
 ## Architecture
 
 - `sage_api`: login, chats, agent loop (SSE streaming), providers, workflows, tasks, audit, usage. One process. `GET /health` open, answers within about 6 s (ServiceHub rule). Docker publish binds `0.0.0.0`, `extra_hosts: host.docker.internal:host-gateway`.
-- `sage_web`: talks only to `sage_api`, relative URLs only. Style: `moss-console-frontend` skill. No reduced-motion handling.
+- `sage_web`: talks only to `sage_api`, relative URLs only. Style: `grey-console-frontend` skill (neutral grey surfaces, no blue backgrounds, blue only for text, icons, the active-item bar and focus rings). No reduced-motion handling.
 - No config files. All settings and secrets live in the DB (see "Settings and secrets"). `.env` holds only the bootstrap admin (two lines, `.env.example` tracked).
 
 ```
@@ -188,6 +188,16 @@ Some workflows wait hours on SAP (first one: readiness check). They hold one run
 
 ## Frontend (`sage_web`)
 
+### Layout
+
+- **Top bar**, 56px, dark grey in both themes: logo, divider, product name, breadcrumb, Light/Dark/System switch, user.
+- **Main menu**, left sidebar: 216px with labels, or a 60px icon-only strip. Collapse button at the bottom and Ctrl+B. State remembered per browser. Every item has an icon and a tooltip.
+- **Chat list**, left of the conversation on the Chat page: 296px, or a 56px rail with a "+" button and one status dot per chat. Collapse button in its header and Ctrl+Shift+B. State remembered.
+- **1000px and below**: the main menu stays a 60px icon-only left sidebar (no tab row, no expand control; labels only as tooltips). The chat list becomes a 320px slide-in drawer opened by a "Chats" button, with a scrim; Esc closes it and focus moves in and back.
+- No horizontal page scroll at 320px.
+
+### Pages
+
 - Login.
 - Chat: chat list, new chat, streaming messages, workflow calls as collapsible cards with their steps, provider and model picker, cancel button, delete with confirm modal.
 - My usage: own counts by day.
@@ -241,3 +251,13 @@ Result: job name and count, final status, file path and size, notes report. The 
 - Other workflows to port: role remediation (auth change, user-role change, obsolete tcode scan, SoD check), addon uninstall guide, authorization requirements of a function module. SUM monitoring needs SSH or HTTP, not PyRFC, so it stays out until a connector decision.
 - The old SSH-based `sys check` has no PyRFC equivalent yet.
 - Email notification on run end (old watcher feature) as a generic task, if wanted later.
+
+## Custom ABAP object names (per system)
+
+Custom function modules and function groups (`ZFM_*`, `ZFG_*`) have a fixed **`abap_object_id`**: the ID in code, tasks, requirements and the setup guide text. A system with another naming convention can map an ID to its own name in the workflow setup guide ("Object names on this system"); the ID is never changed.
+
+- Stored in `abap_names(system_id, abap_object_id, name)`, unique per system and name. Empty by default, so a system without overrides behaves exactly as before. Naming an object by its ID again removes the override.
+- `SapRfc.call` translates the ID to the system's name for every call. Health checks (`TFDIR` read, `S_RFC` rows) and the guide (text, ABAP source, authorization table) use the system's name and show the ID next to it.
+- Names are checked on save: optional `/NAMESPACE/` prefix, a letter first, letters, digits and underscores, at most 30 characters, unique per system, only for IDs some workflow uses. Admin only; audited as `system.abap_name`.
+- Saving a name re-runs the health check of every workflow set up on that system, so the stored result matches the new name.
+- Not renamed: standard SAP objects (`RFC_READ_TABLE`, `TFDIR`, tables) and the ID stored in task steps.
