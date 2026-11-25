@@ -125,17 +125,22 @@ for /f "usebackq eol=# tokens=1,* delims==" %%a in ("%~dp0.env") do (
 )
 exit /b 0
 
+:refreshpath
+rem Re-reads user+machine PATH from the registry, so a tool an installer just added is seen without reopening cmd.
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')"`) do set "PATH=%%p"
+exit /b 0
+
 :install_uv
 echo uv is not installed. Installing it now...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
-set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+call :refreshpath
 exit /b 0
 
 :install_pnpm
 echo pnpm is not installed. Installing it now...
 where winget >nul 2>&1 || ( echo winget is not available; install pnpm manually from https://pnpm.io/installation & exit /b 1 )
 winget install -e --id pnpm.pnpm --accept-package-agreements --accept-source-agreements
-set "PATH=%LOCALAPPDATA%\pnpm;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+call :refreshpath
 exit /b 0
 
 :start_api
