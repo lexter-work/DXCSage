@@ -3,9 +3,9 @@ import { computed } from 'vue'
 const props = defineProps<{ status: string | null | undefined; label?: string }>()
 const cls = computed(() => {
   const s = (props.status ?? '').toLowerCase()
-  if (['pass', 'ok', 'enabled', 'active', 'done', 'set'].includes(s)) return 'ok'
-  if (['warn', 'waiting', 'setup', 'running', 'inactive', 'unknown'].includes(s)) return 'warn'
-  if (['fail', 'failed', 'blocked', 'error', 'disabled'].includes(s)) return 'bad'
+  if (['pass', 'ok', 'enabled', 'active', 'done', 'set', 'granted'].includes(s)) return 'ok'
+  if (['warn', 'waiting', 'setup', 'running', 'inactive', 'unknown', 'review'].includes(s)) return 'warn'
+  if (['fail', 'failed', 'blocked', 'error', 'disabled', 'missing'].includes(s)) return 'bad'
   return 'off'
 })
 // Sentence case in the markup, never via CSS.

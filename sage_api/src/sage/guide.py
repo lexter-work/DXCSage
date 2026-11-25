@@ -10,6 +10,7 @@ _DEFAULT_GUIDE = {
     "fm_authorized": "Add S_RFC to the RFC user's role so the function (or its group) may be called remotely with ACTVT 16.",
     "table_readable": "Add S_TABU_NAM (or S_TABU_DIS for the table's authorization group) with ACTVT 03 for the table.",
     "setting": "Fill in this value on the workflow setup page.",
+    "auth_coverage": "Compares every authorization value the workflow needs with the RFC user. Send the missing values to the security team in one request (see the table on this page).",
 }
 
 
@@ -17,7 +18,7 @@ def load_source(name: str) -> str:
     return (_RFC_DIR / name).read_text(encoding="utf-8", errors="replace")
 
 
-def build_guide(wf_cls, system: dict, rows: list[dict] | None, names: dict[str, str] | None = None) -> dict:
+def build_guide(wf_cls, system: dict, rows: list[dict] | None, names: dict[str, str] | None = None, auth: dict | None = None) -> dict:
     names = {k: v for k, v in (names or {}).items() if k != v}
     ids = sorted(names, key=len, reverse=True)
 
@@ -27,7 +28,7 @@ def build_guide(wf_cls, system: dict, rows: list[dict] | None, names: dict[str, 
         return t
 
     status = {(r["req_kind"], r["req_key"]): r for r in rows or []}
-    steps, auth, seen = [], [], set()
+    steps, auth_table, seen = [], [], set()
     for r in wf_cls.requirements():
         res = status.get((r.kind, r.key))
         steps.append({
@@ -41,10 +42,10 @@ def build_guide(wf_cls, system: dict, rows: list[dict] | None, names: dict[str, 
         for row in r.auth_rows(names):
             if row not in seen:
                 seen.add(row)
-                auth.append(list(row))
+                auth_table.append(list(row))
     return {"workflow": wf_cls.name, "description": wf_cls.description,
             "system": {k: system[k] for k in ("label", "sid", "client", "rfc_user")},
-            "steps": steps, "auth_table": auth,
+            "steps": steps, "auth_table": auth_table, "auth_coverage": auth or {"rows": [], "checked_at": None},
             "abap_objects": [{"object_id": oid, "kind": kind, "name": names.get(oid, oid)} for oid, kind in wf_cls.abap_objects()]}
 
 

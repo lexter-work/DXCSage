@@ -26,22 +26,36 @@ class HealthService:
         reqs = self._workflows[workflow].requirements()
         now, out = iso(self._clock()), []
         blocked = ping_error is not None
+        auth_rows = None
         for r in reqs:
             if blocked and r.kind not in ("reachable", "login"):
                 res_status, msg = "blocked", "system not reachable or login failed"
             else:
                 res = await r.check(env)
-                res_status, msg = res.status, res.message
+                env.done[(r.kind, r.key)] = res
+                res_status, msg = ("warn" if res.status == "fail" and r.level == "warn" else res.status), res.message
+                if r.kind == "auth_coverage":
+                    auth_rows = res.detail
             out.append({"system_id": system_id, "workflow": workflow, "req_kind": r.kind, "req_key": r.key,
                         "status": res_status, "message": msg, "checked_at": now})
         async with self._db.tx() as t:
             await t.execute("DELETE FROM system_health WHERE system_id=? AND workflow=?", (system_id, workflow))
+            if auth_rows is not None:
+                await t.execute("DELETE FROM auth_checks WHERE system_id=? AND workflow=?", (system_id, workflow))
+                for a in auth_rows:
+                    await t.execute("INSERT INTO auth_checks(system_id,workflow,object,field,value,status,source,note,checked_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                                    (system_id, workflow, a["object"], a["field"], a["value"], a["status"], a["source"], a["note"], now))
             for o in out:
                 await t.execute("INSERT INTO system_health(system_id,workflow,req_kind,req_key,status,message,checked_at) VALUES(?,?,?,?,?,?,?)",
                                 (o["system_id"], o["workflow"], o["req_kind"], o["req_key"], o["status"], o["message"], now))
         await self._audit.write("system.health_check", actor, detail={
             "system_id": system_id, "workflow": workflow, "statuses": {f"{o['req_kind']}:{o['req_key']}": o["status"] for o in out}})
         return out
+
+    async def auth_coverage(self, system_id, workflow) -> dict:
+        rows = await self._db.fetchall(
+            "SELECT object,field,value,status,source,note,checked_at FROM auth_checks WHERE system_id=? AND workflow=? ORDER BY object,field,value", (system_id, workflow))
+        return {"rows": rows, "checked_at": rows[0]["checked_at"] if rows else None}
 
     async def latest(self, system_id, workflow) -> list[dict]:
         return await self._db.fetchall("SELECT * FROM system_health WHERE system_id=? AND workflow=? ORDER BY id", (system_id, workflow))

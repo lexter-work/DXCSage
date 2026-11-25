@@ -10,7 +10,7 @@ const { name, systemId } = useRoute().params as { name: string; systemId: string
 const base = `api/workflows/${name}/systems/${systemId}`
 const guide = ref<any | null>(null), wf = ref<any | null>(null), binding = ref<any | null>(null), values = ref<Record<string, string>>({})
 
-const GROUPS: [string, string[]][] = [['Connection', ['reachable', 'login']], ['Function modules', ['fm_exists', 'fm_authorized']], ['Tables', ['table_readable']], ['Settings', ['setting']]]
+const GROUPS: [string, string[]][] = [['Connection', ['reachable', 'login']], ['Function modules', ['fm_exists', 'fm_authorized']], ['Tables', ['table_readable']], ['Authorizations', ['auth_coverage']], ['Settings', ['setting']]]
 const grouped = computed(() => GROUPS.map(([label, kinds]) => [label, (guide.value?.steps ?? []).filter((s: any) => kinds.includes(s.kind))] as const).filter(([, l]) => l.length))
 const total = computed(() => guide.value?.steps.length ?? 0)
 const passed = computed(() => (guide.value?.steps ?? []).filter((s: any) => s.status === 'pass').length)
@@ -19,7 +19,7 @@ const firstBad = computed(() => (guide.value?.steps ?? []).find((s: any) => s.st
 const headline = computed(() => {
   if (!checked.value) return 'Not checked yet. Run the health check to see what is missing.'
   const n = `${passed.value} of ${total.value} checks pass.`
-  if (firstBad.value) return `${n} Fix ${firstBad.value.name || firstBad.value.key || firstBad.value.kind} to finish setup.`
+  if (firstBad.value) return `${n} Fix ${firstBad.value.kind === 'auth_coverage' ? 'the missing authorizations' : firstBad.value.name || firstBad.value.key || firstBad.value.kind} to finish setup.`
   return binding.value?.status === 'enabled' ? `${n} The workflow is enabled on this system.` : `${n} You can enable the workflow.`
 })
 
@@ -74,6 +74,39 @@ async function copyMarkdown() {
 async function copyAuth() {
   const rows = (guide.value?.auth_table ?? []).map((r: string[]) => r.join('\t')).join('\n')
   try { await navigator.clipboard.writeText('Object\tField\tValue\n' + rows); toast('Authorization table copied') } catch (e) { toast(e) }
+}
+
+// Authorization values the workflow needs, compared with the RFC user (filled by the health check).
+const ORDER: Record<string, number> = { missing: 0, unknown: 1, review: 2, granted: 3 }
+const STATUS_LABEL: Record<string, string> = { granted: 'Granted', missing: 'Missing', review: 'To review', unknown: 'Unknown' }
+const cov = computed(() => (guide.value?.auth_coverage?.rows ?? []) as any[])
+const covValues = computed(() => cov.value.filter(r => r.object))
+const covNotes = computed(() => cov.value.filter(r => !r.object))
+const count = (s: string) => covValues.value.filter(r => r.status === s).length
+const needAction = computed(() => covValues.value.filter(r => r.status !== 'granted'))
+const showGranted = ref(false)
+const shown = computed(() => [...covValues.value].filter(r => showGranted.value || r.status !== 'granted' || !needAction.value.length)
+  .sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.object.localeCompare(b.object) || a.field.localeCompare(b.field)))
+
+/** One request for the security team: every missing value now, grouped by object, instead of one blocker per run. */
+function requestText(): string {
+  const lines = (rows: any[]) => {
+    const byObj: Record<string, Record<string, string[]>> = {}
+    for (const r of rows) { const f = ((byObj[r.object] ??= {})[r.field] ??= []); if (!f.includes(r.value)) f.push(r.value) }
+    return Object.entries(byObj).flatMap(([o, fs]) => [o, ...Object.entries(fs).map(([f, v]) => `  ${f} = ${v.join(', ')}`)])
+  }
+  const s = guide.value.system
+  const add = covValues.value.filter(r => r.status === 'missing')
+  const confirm = covValues.value.filter(r => r.status === 'unknown' || r.status === 'review')
+  const out = [`Authorization request for RFC user ${s.rfc_user}`, `System: ${s.label} (${s.sid}), client ${s.client}`,
+    `Needed by: workflow ${guide.value.workflow}, which calls custom function modules over RFC.`, '']
+  if (add.length) out.push(`Please add these authorization values to a role of ${s.rfc_user}:`, ...lines(add), '')
+  if (confirm.length) out.push('Please confirm the user has these (they could not be verified, or the value is decided at run time):', ...lines(confirm), '')
+  if (covNotes.value.length) out.push('Calls the scan could not follow, so checks behind them are not listed:', ...covNotes.value.map(n => `  ${n.value}`), '')
+  return out.join('\n').trimEnd() + '\n'
+}
+async function copyRequest() {
+  try { await navigator.clipboard.writeText(requestText()); toast('Request copied. Paste it into your ticket for the security team.') } catch (e) { toast(e) }
 }
 onMounted(() => load().catch(toast))
 </script>
@@ -139,10 +172,25 @@ onMounted(() => load().catch(toast))
             <button v-if="s.lookup" type="button" class="btn sm" style="justify-self:start" :disabled="lookup(s.key)?.loading" @click="loadOptions(s.key)">Reload from SAP</button>
           </label>
           <div><button class="btn sm" @click="saveSettings">Save settings</button></div></div></div>
-        <div class="sidecard"><h3>Authorizations for the RFC user's role<span class="sp" /><button class="btn sm ghost" @click="copyAuth">Copy</button></h3>
+        <div v-if="covValues.length" class="sidecard"><h3>Authorizations for the RFC user<span class="sp" />
+            <button class="btn sm" :disabled="!needAction.length" @click="copyRequest">Copy request for security</button></h3>
+          <div class="in" style="padding-bottom:0">
+            <p class="authsum"><b>{{ count('missing') }}</b> missing · <b>{{ count('unknown') + count('review') }}</b> to review · <b>{{ count('granted') }}</b> granted</p>
+            <p class="help" style="margin:0">All values this workflow needs on {{ guide.system.label }}, compared with {{ guide.system.rfc_user }} when the health check last ran. Send the missing ones in one request.</p>
+            <label v-if="needAction.length && count('granted')" class="chk"><input v-model="showGranted" type="checkbox"> Show the {{ count('granted') }} granted values</label>
+          </div>
+          <div class="tablewrap"><table><thead><tr><th>Object</th><th>Field</th><th>Value</th><th>Status</th></tr></thead><tbody>
+            <tr v-for="(r, i) in shown" :key="i">
+              <td class="mono">{{ r.object }}</td><td class="mono">{{ r.field }}</td>
+              <td><span class="mono">{{ r.value }}</span><span v-if="r.source" class="help block">Needed by {{ r.source }}<template v-if="r.note"> · {{ r.note }}</template></span></td>
+              <td><StatusPill :status="r.status" :label="STATUS_LABEL[r.status]" /></td></tr></tbody></table></div>
+          <div v-if="covNotes.length" class="in" style="padding-top:8px"><span class="help"><b>Not followed by the scan</b> (checks behind these calls are not listed):</span>
+            <span v-for="(n, i) in covNotes" :key="i" class="help mono block">{{ n.value }}</span></div>
+          <div class="in" style="padding-top:8px"><span class="help">Granted is checked per field, not per authorization, so a missing value is reliable and a granted one is optimistic. Values read from the system's own checks come from <span class="mono">ZFM_AUTH_REQ_LIST</span>.</span></div></div>
+        <div v-else class="sidecard"><h3>Authorizations for the RFC user's role<span class="sp" /><button class="btn sm ghost" @click="copyAuth">Copy</button></h3>
           <div class="tablewrap"><table><thead><tr><th>Object</th><th>Field</th><th>Value</th></tr></thead><tbody>
             <tr v-for="(r, i) in guide.auth_table" :key="i"><td class="mono">{{ r[0] }}</td><td class="mono">{{ r[1] }}</td><td class="mono">{{ r[2] }}</td></tr></tbody></table></div>
-          <div class="in" style="padding-top:8px"><span class="help">Hand this table to Basis.</span></div></div>
+          <div class="in" style="padding-top:8px"><span class="help">Run the health check to compare these with the RFC user and list everything that is missing.</span></div></div>
       </div>
     </div>
   </section>

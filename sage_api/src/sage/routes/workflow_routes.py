@@ -106,7 +106,7 @@ async def guide(name: str, system_id: int, request: Request, format: str = "json
     system = await svc.systems.get(system_id)
     if name not in svc.workflows or not system:
         raise HTTPException(404, "not_found")
-    g = build_guide(svc.workflows[name], system, await svc.health.latest(system_id, name), await svc.systems.abap_names(system_id))
+    g = build_guide(svc.workflows[name], system, await svc.health.latest(system_id, name), await svc.systems.abap_names(system_id), await svc.health.auth_coverage(system_id, name))
     return PlainTextResponse(guide_markdown(g)) if format == "markdown" else g
 
 

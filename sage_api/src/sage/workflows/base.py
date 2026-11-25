@@ -3,7 +3,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from sage.sap.requirements import LoginOk, Reachable, Requirement
+from sage.sap.requirements import SCAN_FM, AuthCoverage, FmAuthorized, FmExists, LoginOk, Reachable, Requirement
 from sage.tasks.base import Task
 
 
@@ -33,10 +33,20 @@ class Workflow(ABC):
     @classmethod
     def requirements(cls) -> list[Requirement]:
         seen, out = set(), []
-        for r in (Reachable(), LoginOk(), *[r for t in cls.tasks for r in t.requirements], *cls.extra_requirements):
-            if (r.kind, r.key) not in seen:
-                seen.add((r.kind, r.key))
-                out.append(r)
+
+        def unique(items):
+            for r in items:
+                if (r.kind, r.key) not in seen:
+                    seen.add((r.kind, r.key))
+                    out.append(r)
+
+        unique((Reachable(), LoginOk(), *[r for t in cls.tasks for r in t.requirements], *cls.extra_requirements))
+        fms = tuple(r.key for r in out if r.kind == "fm_exists")
+        # Listing every authorization up front needs ZFM_AUTH_REQ_LIST. Without it the check degrades to a warning.
+        unique((FmExists(SCAN_FM, level="warn", source="ZFM_AUTH_REQ_LIST.txt",
+                         guide="Optional but recommended: create ZFM_AUTH_REQ_LIST (remote-enabled) as in the attached source. It lets Sage list every authorization a function module needs, so you can request them all at once."),
+                FmAuthorized(SCAN_FM, group="ZFG_MCPARCHPH", level="warn")))
+        unique((AuthCoverage(fms=fms, static=tuple(out)),))
         return out
 
     @classmethod

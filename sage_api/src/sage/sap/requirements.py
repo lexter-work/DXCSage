@@ -1,6 +1,8 @@
 """What a task or workflow needs from a SAP system. Checks are read-only: they never call a
 write or job-scheduling function module. A pass proves existence and authorization, not that it works."""
 import fnmatch
+import json
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -12,6 +14,7 @@ from sage.sap.rfc import RfcError, SapRfc
 class CheckResult(BaseModel):
     status: str                       # pass | warn | fail | blocked
     message: str = ""
+    detail: list[dict] = []           # rows of a requirement that reports a list (authorization coverage)
 
 
 @dataclass
@@ -23,6 +26,7 @@ class CheckEnv:
     settings: Any
     ping_error: RfcError | None = None
     names: dict[str, str] = field(default_factory=dict)   # abap_object_id -> this system's name
+    done: dict = field(default_factory=dict)              # (kind, key) -> CheckResult of requirements checked before this one
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,7 @@ class Requirement:
     key: str = ""
     guide: str = ""
     source: str | None = None         # file name under static/rfc/
+    level: str = "fail"               # "warn": a failure of this requirement does not block enabling the workflow
     kind: ClassVar[str] = "base"
 
     async def check(self, env: CheckEnv) -> CheckResult:
@@ -134,3 +139,100 @@ class SettingPresent(Requirement):
     async def check(self, env):
         val = env.binding.get(self.key) if self.scope == "binding" else await env.settings.get(self.key)
         return CheckResult(status="pass") if val else CheckResult(status=self.level, message=f"setting '{self.key}' is not set")
+
+
+SCAN_FM = "ZFM_AUTH_REQ_LIST"        # custom RFC that lists the authorization checks inside a function module (static scan)
+
+
+def _covers(values: list[tuple[str, str]], wanted: str) -> bool:
+    """Does one authorization field of the account allow `wanted`? Field-level and optimistic: an
+    authorization value counts if any of the account's authorizations of the object holds it."""
+    for von, bis in values:
+        if bis:
+            if von <= wanted <= bis:
+                return True
+        elif fnmatch.fnmatchcase(wanted, von):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class AuthCoverage(Requirement):
+    """Every authorization value the workflow needs, compared with the RFC account, all at once.
+
+    Needed values come from the declared requirements (S_RFC, S_TABU_NAM) plus a static scan of each
+    function module with ZFM_AUTH_REQ_LIST. "missing" is reliable (the value is in none of the account's
+    authorizations); "granted" is optimistic because the account's values are read per field, not per
+    authorization. Unverified: SUSR_USER_AUTH_FOR_OBJ_GET remote-enabled and returning FIELD/VON/BIS.
+    """
+    fms: tuple[str, ...] = ()
+    static: tuple[Requirement, ...] = ()
+    kind: ClassVar[str] = "auth_coverage"
+
+    async def check(self, env):
+        need: dict[tuple[str, str, str], set[str]] = {}
+
+        def add(obj, fld, val, by):
+            if obj and "DUMMY" not in val.upper():
+                need.setdefault((obj, fld, val), set()).add(by)
+
+        for r in self.static:
+            for o, f, v in r.auth_rows(env.names):
+                add(o, f, v, r.key or r.kind)
+        unresolved, scan_error = [], None
+        for fm in self.fms:
+            try:
+                res = await env.rfc.call(env.system_id, SCAN_FM, IV_FUNCNAME=env.names.get(fm, fm), IV_MODE="S",
+                                         IV_MAX_DEPTH=3, IV_INCL_STANDARD="", IV_TRACE_USER="")
+                errs = [str(m.get("MESSAGE", "")).strip() for m in res.get("ET_RETURN") or [] if m.get("TYPE") in ("E", "A")]
+                if errs:
+                    raise RfcError("ABAP", "; ".join(errs))
+                payload = json.loads(res.get("EV_JSON") or "{}")
+            except (RfcError, json.JSONDecodeError) as e:
+                scan_error = getattr(e, "message", None) or str(e)
+                break
+            for row in payload.get("rows") or []:
+                add(str(row.get("auth_object", "")), str(row.get("auth_field", "")), str(row.get("auth_values", "")), fm)
+            unresolved += [f"{fm}: {u}" for u in payload.get("unresolved") or []]
+
+        tables = [t for (k, t) in env.done if k == "table_readable"]
+        tables_ok = bool(tables) and all(env.done[("table_readable", t)].status == "pass" for t in tables)
+        cache: dict[str, dict | None] = {}
+
+        async def account(obj):
+            if obj not in cache:
+                try:
+                    res = await env.rfc.call(env.system_id, "SUSR_USER_AUTH_FOR_OBJ_GET", USER_NAME=env.rfc_user, SAP_OBJECT=obj)
+                except RfcError:
+                    cache[obj] = None
+                else:
+                    vals: dict[str, list[tuple[str, str]]] = {}
+                    for r in res.get("VALUES", []):
+                        vals.setdefault(r["FIELD"].strip(), []).append((r["VON"].strip(), (r.get("BIS") or "").strip()))
+                    cache[obj] = vals
+            return cache[obj]
+
+        rows = []
+        for (o, f, v), by in sorted(need.items()):
+            if o == "S_TABU_NAM" and tables_ok:
+                status, note = "granted", "proved by the table read test"
+            elif "<" in v:
+                status, note = "review", "the value is decided at run time"
+            else:
+                vals = await account(o)
+                if vals is None:
+                    status, note = "unknown", "the account's authorizations could not be read"
+                else:
+                    status, note = ("granted", "") if _covers(vals.get(f, []), v) else ("missing", "")
+            rows.append({"object": o, "field": f, "value": v, "status": status, "source": ", ".join(sorted(by)), "note": note})
+        rows += [{"object": "", "field": "", "value": u, "status": "review", "source": "", "note": "not followed by the scan"} for u in unresolved]
+
+        n = Counter(r["status"] for r in rows if r["object"])
+        review = n["review"] + n["unknown"]
+        msg = f"{n['missing']} missing, {review} to review, {n['granted']} granted of {sum(n.values())} authorization values"
+        if scan_error:
+            msg += f". The authorizations checked inside the function modules are not listed: {scan_error}"
+        elif unresolved:
+            msg += f". {len(unresolved)} call(s) were not followed by the scan"
+        status = "fail" if n["missing"] else "warn" if (review or scan_error or unresolved) else "pass"
+        return CheckResult(status=status, message=msg, detail=rows)

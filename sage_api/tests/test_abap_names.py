@@ -45,7 +45,9 @@ async def test_health_checks_the_renamed_object_and_the_guide_keeps_the_id(clien
     assert step["key"] == "ZFM_T" and step["name"] == "YFM_T" and "YFM_T (ID ZFM_T)" in step["title"]
     assert "YFM_T" in step["text"] and "ZFM_T" not in step["source_text"].replace("ZFM_CHECK_JOB_STATUS", "")
     assert ["S_RFC", "RFC_NAME", "YFM_T"] in g["auth_table"] and ["S_RFC", "RFC_NAME", "ZFM_T"] not in g["auth_table"]
-    assert g["abap_objects"] == [{"object_id": "ZFM_T", "kind": "function_module", "name": "YFM_T"}]
+    assert g["abap_objects"] == [{"object_id": "ZFM_T", "kind": "function_module", "name": "YFM_T"},
+                                 {"object_id": "ZFM_AUTH_REQ_LIST", "kind": "function_module", "name": "ZFM_AUTH_REQ_LIST"},
+                                 {"object_id": "ZFG_MCPARCHPH", "kind": "function_group", "name": "ZFG_MCPARCHPH"}]
     md = (await client.get("/api/workflows/wf_b/systems/1/guide?format=markdown")).text
     assert "YFM_T (ID ZFM_T)" in md
 

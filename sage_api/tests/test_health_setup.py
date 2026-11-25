@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import BaseModel
 
@@ -50,11 +52,14 @@ SYS = {"label": "TS3", "sid": "TS3", "description": "", "ashost": "h", "sysnr": 
 
 
 def prepare_ok(fake):
-    fake.tables["TFDIR"], fake.lengths["TFDIR"] = [{"FUNCNAME": "ZFM_T"}], {"FUNCNAME": 30}
+    fake.tables["TFDIR"], fake.lengths["TFDIR"] = [{"FUNCNAME": "ZFM_T"}, {"FUNCNAME": "ZFM_AUTH_REQ_LIST"}], {"FUNCNAME": 30}
     fake.tables["T1"], fake.lengths["T1"] = [{"A": "1"}], {"A": 5}
     fake.functions["SUSR_USER_AUTH_FOR_OBJ_GET"] = lambda **_: {"VALUES": [
-        {"FIELD": "RFC_TYPE", "VON": "FUNC", "BIS": ""}, {"FIELD": "RFC_NAME", "VON": "*", "BIS": ""},
-        {"FIELD": "ACTVT", "VON": "16", "BIS": ""}]}
+        {"FIELD": f, "VON": v, "BIS": ""} for f, v in
+        [("RFC_TYPE", "FUNC"), ("RFC_NAME", "*"), ("ACTVT", "*"), ("TABLE", "*"), ("JOBACTION", "*")]]}
+    fake.functions["ZFM_AUTH_REQ_LIST"] = lambda **p: {"ET_RETURN": [], "EV_JSON": json.dumps({"rows": [
+        {"auth_object": "S_BTCH_JOB", "auth_field": "JOBACTION", "auth_values": "RELE", "source": "STATIC:X:1", "depth": 1, "callee_path": "ZFM_T"}],
+        "unresolved": []})}
 
 
 async def mk_system(client):
@@ -64,9 +69,11 @@ async def mk_system(client):
 
 def test_shared_task_requirements_deduped_per_workflow():
     keys = [(r.kind, r.key) for r in WfA.requirements()]
+    tail = [("fm_exists", "ZFM_AUTH_REQ_LIST"), ("fm_authorized", "ZFM_AUTH_REQ_LIST"), ("auth_coverage", "")]
     assert keys == [("reachable", ""), ("login", ""), ("fm_exists", "ZFM_T"), ("fm_authorized", "ZFM_T"),
-                    ("table_readable", "T1"), ("setting", "default_variant")]
-    assert [(r.kind, r.key) for r in WfB.requirements()][-2:] == [("fm_exists", "ZFM_T"), ("fm_authorized", "ZFM_T")]
+                    ("table_readable", "T1"), ("setting", "default_variant")] + tail
+    assert [(r.kind, r.key) for r in WfB.requirements()][2:4] == [("fm_exists", "ZFM_T"), ("fm_authorized", "ZFM_T")]
+    assert [(r.kind, r.key) for r in WfB.requirements()][-3:] == tail      # every workflow gets the authorization comparison
 
 
 async def test_setup_check_enable_flow(client, fake_rfc):

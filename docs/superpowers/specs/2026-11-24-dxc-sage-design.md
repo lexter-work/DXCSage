@@ -261,3 +261,14 @@ Custom function modules and function groups (`ZFM_*`, `ZFG_*`) have a fixed **`a
 - Names are checked on save: optional `/NAMESPACE/` prefix, a letter first, letters, digits and underscores, at most 30 characters, unique per system, only for IDs some workflow uses. Admin only; audited as `system.abap_name`.
 - Saving a name re-runs the health check of every workflow set up on that system, so the stored result matches the new name.
 - Not renamed: standard SAP objects (`RFC_READ_TABLE`, `TFDIR`, tables) and the ID stored in task steps.
+
+## Authorization coverage (in the health check)
+
+Every workflow's health check ends with an `auth_coverage` requirement that lists **all** authorization values the workflow needs and compares them with the RFC user, so the admin can ask the security team once instead of finding one blocker per run.
+
+- **Needed values:** the declared requirements (`S_RFC` per function module and group, `S_TABU_NAM` per table) plus a static scan of each function module with the custom RFC `ZFM_AUTH_REQ_LIST` (every `AUTHORITY-CHECK` it contains, following the calls it makes). `DUMMY` checks are skipped.
+- **Per value:** `granted`, `missing`, `review` (value decided at run time, or a call the scan could not follow) or `unknown` (the account's authorizations could not be read). Table authorizations count as granted when the table read test passed.
+- **Reliability:** `missing` is reliable (the value is in none of the account's authorizations). `granted` is optimistic because the account's values are read per field, not per authorization. Unverified on a real system: `SUSR_USER_AUTH_FOR_OBJ_GET` being remote-enabled and returning FIELD/VON/BIS.
+- **Status:** any `missing` fails the requirement and blocks enabling; `review`, `unknown` or a scan that could not run only warn. `ZFM_AUTH_REQ_LIST` is a recommended, not required, function module (`level="warn"`): without it the declared values are still checked.
+- **Stored** in `auth_checks` (replaced on every check). The setup guide shows them with the object, field, value, which function module needs them and the status, and "Copy request for security" copies one grouped text of everything missing or to be confirmed.
+- Requirements have a `level`: `warn` turns a failure of that requirement into a warning.
