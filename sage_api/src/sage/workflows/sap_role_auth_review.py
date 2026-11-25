@@ -8,7 +8,7 @@ from sage.sap.roleauth_review import Review, RoleChange, clean, review
 from sage.sap.sod import normalize_rules
 from sage.workflows.base import SystemInput, Workflow
 
-TABLES = ("AGR_DEFINE", "AGR_AGRS", "AGR_1251", "AGR_TCODES")
+TABLES = ("AGR_DEFINE", "AGR_AGRS", "AGR_1251", "AGR_1252", "AGR_TCODES")
 
 
 class ReviewInput(SystemInput):
@@ -38,7 +38,7 @@ async def policy_args(ctx, raw, policy, extra: str | None) -> list[dict]:
 
 class SapRoleAuthReview(Workflow):
     name = "sap_role_auth_review"
-    description = ("Review a request to change role authorizations (add, remove or modify an authorization value, or remove a transaction "
+    description = ("Review a request to change role authorizations (add, remove or modify an authorization value or an organization-level value such as $BUKRS, or remove a transaction "
                    "code from a role) before anyone changes anything: checks that the roles, objects and values exist, flags derived and "
                    "composite roles, applies the policy (restricted objects, wildcard, activity levels, SAP_* roles, request size) and "
                    "compares the role with the SoD matrix before and after. 'ready' is false on any error, policy violation or new "

@@ -17,11 +17,12 @@ KINDS = {
     "user_roles": {"title": "User role changes", "columns": [("Username", True, "SAP user ID"), ("Role", True, "Role name"), ("Action", True, "assign or unassign")],
                    "examples": [("JSMITH", "Z_AP_CLERK", "assign"), ("JSMITH", "Z_AP_APPROVER", "unassign")], "actions": "assign,unassign"},
     "role_auth": {"title": "Role authorization changes",
-                  "columns": [("Role", True, "Role name. Not an SAP_* standard role."), ("Object", True, "Authorization object, for example F_BKPF_BUK"),
-                              ("Field", True, "Authorization field, for example ACTVT"), ("Current Value", False, "The value to replace or remove (modify, remove)"),
+                  "columns": [("Role", True, "Role name. Not an SAP_* standard role."), ("Object", True, "Authorization object, for example F_BKPF_BUK. Leave empty for an organization level."),
+                              ("Field", True, "Authorization field, for example ACTVT, or an organization level with a $, for example $BUKRS"), ("Current Value", False, "The value to replace or remove (modify, remove)"),
                               ("Requested Value", False, "The value to add, or the new value (add, modify)"), ("Action", False, "add, modify or remove. Blank: worked out from the values.")],
                   "examples": [("Z_FI_POSTER", "F_BKPF_BUK", "ACTVT", "03", "02", "modify"), ("Z_FI_POSTER", "F_BKPF_BUK", "BUKRS", "", "1000", "add"),
-                               ("Z_FI_POSTER", "F_BKPF_BUK", "BUKRS", "2000", "", "remove")], "actions": "add,modify,remove"},
+                               ("Z_FI_POSTER", "F_BKPF_BUK", "BUKRS", "2000", "", "remove"),
+                               ("Z_FI_POSTER", "", "$BUKRS", "", "3000", "add")], "actions": "add,modify,remove"},
     "tcode_removal": {"title": "Remove transaction codes from roles", "columns": [("Role", True, "Role name"), ("Tcode", True, "Transaction code to remove from the role menu and from S_TCODE")],
                       "examples": [("Z_BASIS_ADMIN", "SU01")], "actions": ""},
 }
@@ -57,7 +58,7 @@ def build_template(kind: str) -> bytes:
              "Upload the file in the chat and ask Sage to review it first. A request is only applied after the review passes and you confirm.", "", "Columns"]
     lines += [f"{n}{' (required)' if req else ''}: {why}" for n, req, why in spec["columns"]]
     if kind == "role_auth":
-        lines += ["", "Values of ACTVT are two characters: 2 is read as 02.", "Organization-level fields (starting with $) and adding a whole new authorization object are not supported: use PFCG."]
+        lines += ["", "Values of ACTVT are two characters: 2 is read as 02.", "An organization level starts with $ in Field (for example $BUKRS) and has no Object. The role must already have that level: add the level itself in PFCG. Derived roles keep their own organization values.", "Adding a whole new authorization object to a role is not supported: use PFCG."]
     ins.column_dimensions["A"].width = 110
     for i, t in enumerate(lines, 1):
         ins.cell(row=i, column=1, value=t).alignment = Alignment(wrap_text=True)
@@ -139,13 +140,12 @@ def _role_auth(h, data):
         role, obj, fld, cur, req, act = get(ir), get(io_), get(ifld), get(ic), get(iq), get(ia).lower()
         if not (role or obj or fld or cur or req or act):
             continue
-        if not (role and obj and fld):
-            errors.append(f"Row {n}: Role, Object and Field are required.")
-            continue
-        if fld.startswith("$"):
-            errors.append(f"Row {n}: {fld} is an organization-level field. These are not supported: change them in PFCG.")
+        if not (role and fld and (obj or fld.startswith("$"))):
+            errors.append(f"Row {n}: Role and Field are required, and Object unless the Field is an organization level ($...).")
             continue
         fld = fld.upper()
+        if fld.startswith("$"):
+            obj = ""
         if fld == "ACTVT":
             cur, req = (v.zfill(2) if v.isdigit() and len(v) == 1 else v for v in (cur, req))
         act = AUTH_ACTIONS.get(act, act) or ("modify" if cur and req else "add" if req else "remove" if cur else "")

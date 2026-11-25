@@ -88,3 +88,47 @@ async def test_failed_role_stops_the_run_and_skips_regeneration(db, audit, rfc, 
                     [C("Z_B", "modify", value="02", cur="03"), C("Z_PARENT", "modify", value="02", cur="03")])
     assert out.executed and [d.success for d in out.changes_applied] == [False] and "not changed" in out.changes_applied[0].message
     assert out.derived_regenerated == [] and calls == [] and "STOPPED" in out.message
+
+
+def org_world(fake):
+    calls = world(fake)
+    fake.lengths["AGR_1252"] = {"AGR_NAME": 30, "VARBL": 10, "LOW": 40}
+    fake.tables["AGR_1252"] = [{"AGR_NAME": "Z_PARENT", "VARBL": "BUKRS", "LOW": "1000"}, {"AGR_NAME": "Z_B", "VARBL": "BUKRS", "LOW": "1000"}]
+    fake.functions["ZFM_RR_ORG_LEVEL_CHANGE"] = lambda **p: calls.append(("org", p["ACTIVITY_GROUP"], len(p["ORG_VALUES"]), len(p["ORG_VALUES_DELETE"]))) or {"RETURN": []}
+    return calls
+
+
+def O(role, action, level="$BUKRS", value="2000", cur=""):
+    return RoleChange(role=role, action=action, object="F_IGNORED", field=level, value=value, current_value=cur)
+
+
+def test_org_level_changes_drop_the_object_and_need_a_level_name():
+    ok, err = clean([O("z_a", "add")], 10)
+    assert ok[0].object == "" and ok[0].field == "$BUKRS" and not err
+    assert clean([O("z_a", "add", level="$")], 10)[1]
+
+
+async def test_org_level_review_checks_the_values_on_the_role(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    calls = org_world(fake_rfc)
+    bad = [O("Z_PARENT", "add", value="1000"), O("Z_PARENT", "remove", value="9999"), O("Z_PARENT", "add", level="$KOKRS"), O("Z_B", "modify", value="*", cur="1000")]
+    rv = await run(SapRoleAuthReview, db, audit, rfc, settings_store, tmp_path, bad)
+    text = " ".join(rv.errors)
+    assert not rv.ready and "already has the value 1000" in text and "does not have the value 9999" in text and "no organization level $KOKRS" in text
+    assert {v.policy for v in rv.violations} == {"Wildcard value"}
+    out = await run(SapRoleAuthChange, db, audit, rfc, settings_store, tmp_path, bad)
+    assert not out.executed and calls == []
+
+
+async def test_org_level_change_calls_its_own_module_and_skips_derived_regeneration(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    calls = org_world(fake_rfc)
+    out = await run(SapRoleAuthChange, db, audit, rfc, settings_store, tmp_path, [O("Z_PARENT", "add"), O("Z_PARENT", "modify", value="3000", cur="1000")])
+    assert out.executed and calls == [("org", "Z_PARENT", 2, 1)] and out.derived_regenerated == []
+    assert any("derived roles" in w for w in out.review.warnings)
+    sent = next(p for f, p in fake_rfc.calls if f == "ZFM_RR_ORG_LEVEL_CHANGE")
+    assert sent["ORG_VALUES"] == [{"VARBL": "BUKRS", "LOW": "2000", "HIGH": ""}, {"VARBL": "BUKRS", "LOW": "3000", "HIGH": ""}] and sent["ORG_VALUES_DELETE"][0]["LOW"] == "1000"
+
+
+async def test_org_and_authorization_changes_in_one_request_regenerate_derived_roles(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    calls = org_world(fake_rfc)
+    mixed = await run(SapRoleAuthChange, db, audit, rfc, settings_store, tmp_path, [C("Z_PARENT", "modify", value="02", cur="03"), O("Z_PARENT", "add", value="4000")])
+    assert [c[0] for c in calls] == ["change", "org", "derived"] and mixed.executed

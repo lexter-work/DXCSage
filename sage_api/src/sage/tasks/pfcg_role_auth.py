@@ -5,7 +5,7 @@ from sage.sap.requirements import DeclaredAuth, FmAuthorized, FmExists
 from sage.sap.rfc import RfcError
 from sage.tasks.base import Task
 
-CHANGE_FM, TCODE_FM, DERIVED_FM, GROUP = "ZFM_RR_ROLE_AUTH_CHANGE", "ZFM_RR_TCODE_REMOVE", "ZFM_RR_DERIVED_REGENERATE", "ZFG_MCPARCHPH"
+CHANGE_FM, TCODE_FM, DERIVED_FM, ORG_FM, GROUP = "ZFM_RR_ROLE_AUTH_CHANGE", "ZFM_RR_TCODE_REMOVE", "ZFM_RR_DERIVED_REGENERATE", "ZFM_RR_ORG_LEVEL_CHANGE", "ZFG_MCPARCHPH"
 # Usual values for editing roles and generating profiles. Not verified on a system: confirm with the security team.
 PFCG_AUTH = DeclaredAuth(key="role maintenance", rows=(
     ("S_USER_AGR", "ACTVT", "02"), ("S_USER_AGR", "ACT_GROUP", "*"), ("S_USER_PRO", "ACTVT", "02"), ("S_USER_PRO", "PROFILE", "*")),
@@ -51,6 +51,35 @@ class ChangeRoleAuth(Task):
             return Done(role=data.role, success=False, message=f"{e.code}: {e.message}" + (" The role WAS changed but its profile is stale: regenerate it in PFCG." if stale else " The role was not changed."))
         msgs = "; ".join(str(m.get("MESSAGE", "")).strip() for m in res.get("RETURN") or [] if m.get("MESSAGE"))
         return Done(role=data.role, success=True, message=f"Changed {data.role}: {len(data.deletes)} removed, {len(data.adds)} added." + (f" {msgs}" if msgs else ""))
+
+
+class OrgValue(BaseModel):
+    varbl: str                        # the organization level without the $, for example BUKRS
+    low: str
+    high: str = ""
+
+
+class OrgChangeIn(BaseModel):
+    role: str
+    adds: list[OrgValue] = []
+    deletes: list[OrgValue] = []
+
+
+class ChangeOrgLevel(Task):
+    name, Input, Output, idempotent = "pfcg.change_org_level", OrgChangeIn, Done, False
+    requirements = (FmExists(ORG_FM, source="ZFM_RR_ORG_LEVEL_CHANGE.txt",
+                             guide=_guide(ORG_FM, "Create the structure ZROLE_ORG_VALUE first. It is a DRAFT: check every PRGN_1252_* call in SE37 and test it in a sandbox client.")),
+                    FmAuthorized(ORG_FM, group=GROUP), PFCG_AUTH)
+
+    async def run(self, ctx, data):
+        rows = lambda vs: [{"VARBL": v.varbl, "LOW": v.low, "HIGH": v.high} for v in vs]  # noqa: E731
+        try:
+            res = await ctx.rfc.call(ctx.system_id, ORG_FM, ACTIVITY_GROUP=data.role, ORG_VALUES=rows(data.adds), ORG_VALUES_DELETE=rows(data.deletes))
+        except RfcError as e:
+            stale = "PROFILE_GENERATION_FAILED" in f"{e.code} {e.message}"
+            return Done(role=data.role, success=False, message=f"{e.code}: {e.message}" + (" The organization values WERE changed but the profile is stale: regenerate it in PFCG." if stale else " The role was not changed."))
+        msgs = "; ".join(str(m.get("MESSAGE", "")).strip() for m in res.get("RETURN") or [] if m.get("MESSAGE"))
+        return Done(role=data.role, success=True, message=f"Changed the organization values of {data.role}: {len(data.deletes)} removed, {len(data.adds)} added." + (f" {msgs}" if msgs else ""))
 
 
 class TcodeIn(BaseModel):

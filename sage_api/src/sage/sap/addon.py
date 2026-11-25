@@ -3,6 +3,11 @@ import re
 
 COMPONENT_RE = re.compile(r"^[A-Z][A-Z0-9_/-]{0,29}$")
 PATCH_TYPES = ("AOI", "AOX", "AOS", "AOU", "CVD")     # install, upgrade, supplement, update, CVD: not a deinstall package
+# Component dependencies: one row per "COMPONENT requires EXT_COMPONENT". Table and field names are NOT verified on a system:
+# if they are wrong the workflow reports that the dependencies could not be read, and these two lines are the place to fix.
+DEP_TABLE, DEP_FIELDS = "CVERS_REF", ["COMPONENT", "RELEASE", "EXT_COMPONENT", "EXT_RELEASE"]
+CATEGORIES = {"sap_core": "Part of the SAP core or a technical base", "industry_solution": "SAP industry or line-of-business solution",
+              "sap_optional": "Optional SAP add-on", "partner_or_customer": "Partner or customer add-on", "unknown": "Could not be told"}
 
 
 def normalize(component: str) -> str:
@@ -19,15 +24,40 @@ def current_patch(rows: list[dict], release: str) -> str:
     return cand[0]["PATCH"].strip() if cand else ""
 
 
-def risk(custom_objects: int) -> tuple[str, list[str]]:
-    """Only what this workflow can see: custom (Z*) objects inside the component's packages. Dependencies between
-    components are not read from the system (no reliable table), so they are not part of the risk."""
+def dependents(rows: list[dict], target: str, installed: dict[str, str]) -> tuple[list[str], list[str]]:
+    """(installed components that require the target, components the target requires) from the dependency rows."""
+    by = sorted({r["COMPONENT"].strip().upper() for r in rows if r["EXT_COMPONENT"].strip().upper() == target and r["COMPONENT"].strip().upper() in installed} - {target})
+    needs = sorted({r["EXT_COMPONENT"].strip().upper() for r in rows if r["COMPONENT"].strip().upper() == target and r["EXT_COMPONENT"].strip()} - {target})
+    return by, needs
+
+
+def risk(custom_objects: int, required_by: list[str] = (), category: str = "") -> tuple[str, list[str]]:
+    """What this workflow can see: custom (Z*) objects inside the component's packages, installed components that require
+    this one, and the category the model gave it (a judgment: it can only raise the level)."""
     level = "HIGH" if custom_objects > 50 else "MEDIUM" if custom_objects > 10 else "LOW"
-    return level, ([f"{custom_objects} custom object(s) sit in the packages of this component"] if custom_objects
-                   else ["No custom objects found in the packages of this component"])
+    factors = ([f"{custom_objects} custom object(s) sit in the packages of this component"] if custom_objects
+               else ["No custom objects found in the packages of this component"])
+    if required_by:
+        level = "HIGH"
+        factors.append(f"{len(required_by)} installed component(s) require it: {', '.join(required_by)}")
+    if category == "sap_core":
+        level = "HIGH"
+        factors.append("Classified as part of the SAP core or a technical base (AI judgment)")
+    elif category == "industry_solution" and level == "LOW":
+        level = "MEDIUM"
+        factors.append("Classified as an SAP industry or line-of-business solution (AI judgment)")
+    return level, factors
 
 
-def work_order(component: str, sid: str, release: str, patch: str, deletable: bool, level: str, factors: list[str], custom_in_use: int) -> str:
+def _deps_text(checked: bool, required_by: list[str], needs: list[str]) -> str:
+    if not checked:
+        return "Dependencies on other components could NOT be read from this system. Maintenance Planner calculates them (step 3)."
+    return ("Components that require it: " + (", ".join(required_by) + ". They must be removed or kept compatible first." if required_by else "none found.") +
+            "\nComponents it requires: " + (", ".join(needs) if needs else "none found.") + "\nMaintenance Planner calculates the final result (step 3).")
+
+
+def work_order(component: str, sid: str, release: str, patch: str, deletable: bool, level: str, factors: list[str], custom_in_use: int,
+               checked: bool = False, required_by: list[str] = (), needs: list[str] = (), category: str = "", reason: str = "") -> str:
     bar, line = "=" * 70, "-" * 70
     return f"""{bar}
   SAP ADD-ON UNINSTALLATION - WORK ORDER
@@ -40,7 +70,8 @@ Impact: {level}
 {chr(10).join('  - ' + f for f in factors)}
 Custom objects in the component's packages: {custom_in_use}
 
-Dependencies on other components are NOT determined by this guide. Maintenance Planner calculates them (step 3).
+{'Classification (AI judgment, not a fact): ' + CATEGORIES[category] + (' - ' + reason if reason else '') if category else 'Classification: none given.'}
+{_deps_text(checked, list(required_by), list(needs))}
 
 {line}
 BASIS ACTIONS

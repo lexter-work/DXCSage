@@ -1,0 +1,161 @@
+* DRAFT. Not run on any system. Modelled on ZFM_RR_ROLE_AUTH_CHANGE.
+* Every PRGN_1252_* name and interface below is a best guess: open each one in SE37
+* (and the function group of the PRGN_* modules) and CONFIRM the names, the
+* parameters and the row type before you activate. Test in a sandbox client first.
+* Organization levels sit in AGR_1252 (AGR_NAME, VARBL, LOW, HIGH). VARBL has no $.
+  DATA: lv_agr_name TYPE agr_name,
+        lv_request  TYPE trkorr,
+        ls_add      TYPE zrole_org_value,
+        ls_del      TYPE zrole_org_value,
+        lt_org      TYPE STANDARD TABLE OF pt1252,   " CONFIRM IN SE37: row type of AGR_1252
+        ls_org      TYPE pt1252,
+        lt_return   TYPE bapirettab,
+        lt_gen_ret  TYPE STANDARD TABLE OF bapiret2.
+  CONSTANTS: c_modified TYPE tpr_st_mod VALUE 'G'.
+
+  lv_agr_name = activity_group.
+
+  AUTHORITY-CHECK OBJECT 'S_USER_AGR'
+    ID 'ACTVT'     FIELD '02'
+    ID 'ACT_GROUP' FIELD lv_agr_name.
+  IF sy-subrc <> 0.
+    RAISE no_authorization.
+  ENDIF.
+
+  SELECT SINGLE agr_name FROM agr_define INTO lv_agr_name WHERE agr_name = lv_agr_name.
+  IF sy-subrc <> 0.
+    RAISE role_not_found.
+  ENDIF.
+
+* --- 1. lock ---
+  CALL FUNCTION 'PRGN_ACTIVITY_GROUP_ENQUEUE'
+    EXPORTING
+      activity_group = lv_agr_name
+      no_dialog      = 'X'
+    IMPORTING
+      new_request    = lv_request
+    EXCEPTIONS
+      foreign_lock   = 1
+      OTHERS         = 2.
+  IF sy-subrc = 1.
+    RAISE role_locked.
+  ELSEIF sy-subrc <> 0.
+    RAISE update_failed.
+  ENDIF.
+
+* --- 2. backup: a snapshot, not an automatic rollback ---
+  CALL FUNCTION 'PRGN_DOWNLOAD_AGR'
+    EXPORTING
+      activity_group          = lv_agr_name
+      with_authorization_data = 'X'
+      display_log             = space
+      create_file_only        = 'X'
+    IMPORTING
+      return                  = lt_return
+    TABLES
+      file_content            = role_backup
+    EXCEPTIONS
+      OTHERS                  = 1.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+    RAISE backup_failed.
+  ENDIF.
+
+* --- 3. read the organization values ---
+  CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+  CALL FUNCTION 'PRGN_1252_READ_ORG_VALUES'          " CONFIRM IN SE37: name and parameters
+    EXPORTING
+      activity_group = lv_agr_name
+    TABLES
+      org_values     = lt_org
+    EXCEPTIONS
+      no_data_available = 1
+      OTHERS            = 2.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+* --- 4. apply in memory, checking everything before the first write ---
+  LOOP AT org_values_delete INTO ls_del.
+    DELETE lt_org WHERE varbl = ls_del-varbl AND low = ls_del-low.
+    IF sy-subrc <> 0.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+      RAISE value_not_found.
+    ENDIF.
+  ENDLOOP.
+
+  LOOP AT org_values INTO ls_add.
+    READ TABLE lt_org TRANSPORTING NO FIELDS WITH KEY varbl = ls_add-varbl.
+    IF sy-subrc <> 0.
+*     The level has no row left after the deletes. A level that is not on the role at all is
+*     refused by the review, so here it can only be an add after deleting its last value.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+      RAISE org_level_not_on_role.
+    ENDIF.
+    READ TABLE lt_org TRANSPORTING NO FIELDS WITH KEY varbl = ls_add-varbl low = ls_add-low.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+      CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+      RAISE value_already_exists.
+    ENDIF.
+    CLEAR ls_org.
+    ls_org-agr_name = lv_agr_name.
+    ls_org-varbl    = ls_add-varbl.
+    ls_org-low      = ls_add-low.
+    ls_org-high     = ls_add-high.
+    APPEND ls_org TO lt_org.
+  ENDLOOP.
+
+* --- 5. save, then flush to the database and commit ---
+  CALL FUNCTION 'PRGN_1252_SAVE_ORG_VALUES'          " CONFIRM IN SE37: name and parameters
+    EXPORTING
+      activity_group = lv_agr_name
+    TABLES
+      org_values     = lt_org
+    EXCEPTIONS
+      OTHERS         = 1.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+
+  CALL FUNCTION 'PRGN_UPDATE_DATABASE'
+    EXCEPTIONS
+      OTHERS = 1.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+    RAISE update_failed.
+  ENDIF.
+  COMMIT WORK AND WAIT.
+  CALL FUNCTION 'PRGN_CLEAR_BUFFER'.
+
+* --- 6. regenerate the profile. The organization values feed the authorization values ($BUKRS),
+*        so the generator must rebuild them: rebuild_auth_data = 'X' (the plain value change leaves it off). ---
+  CALL FUNCTION 'PRGN_AUTO_GENERATE_PROFILE_NEW'
+    EXPORTING
+      activity_group    = lv_agr_name
+      no_dialog         = 'X'
+      generate_profile  = 'X'
+      rebuild_auth_data = 'X'
+      request           = lv_request
+    IMPORTING
+      new_request       = lv_request
+    TABLES
+      return            = lt_gen_ret
+    EXCEPTIONS
+      OTHERS            = 1.
+  IF sy-subrc <> 0.
+    APPEND LINES OF lt_gen_ret TO return.
+    CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE' EXPORTING activity_group = lv_agr_name.
+    RAISE profile_generation_failed.
+  ENDIF.
+
+  COMMIT WORK AND WAIT.
+
+* --- 7. unlock ---
+  CALL FUNCTION 'PRGN_ACTIVITY_GROUP_DEQUEUE'
+    EXPORTING activity_group = lv_agr_name.

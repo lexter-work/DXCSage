@@ -16,10 +16,14 @@ VALUE_OK = re.compile(r"^[^'\x00-\x1f]{1,40}$")        # goes into a WHERE claus
 class RoleChange(BaseModel):
     role: str
     action: Literal["add", "remove", "modify", "remove_tcode"]
-    object: str = ""                  # not used by remove_tcode
-    field: str = ""                   # not used by remove_tcode
+    object: str = ""                  # not used by remove_tcode or by an organization-level field
+    field: str = ""                   # not used by remove_tcode. "$BUKRS" is the organization level BUKRS (AGR_1252), not an authorization field.
     value: str                        # the value to add or remove, the new value of a modify, or the transaction code of remove_tcode
     current_value: str = ""           # modify only: the value being replaced
+
+
+def is_org(c: RoleChange) -> bool:
+    return c.field.startswith("$")
 
 
 class RoleReview(BaseModel):
@@ -60,9 +64,12 @@ def clean(raw: list[RoleChange], max_entries: int) -> tuple[list[RoleChange], li
                                  "value": c.value.strip(), "current_value": c.current_value.strip()})
         if c.action == "remove_tcode":
             c = c.model_copy(update={"object": "S_TCODE", "field": "TCD", "value": c.value.upper()})
+        org = is_org(c)
+        if org:
+            c = c.model_copy(update={"object": ""})
         bad = not SAFE.match(c.role) or len(c.role) > 30 or not SAFE.match(c.object or "X") or not SAFE.match(c.field or "X") \
             or not VALUE_OK.match(c.value) or (c.current_value and not VALUE_OK.match(c.current_value))
-        if bad or not c.object or not c.field:
+        if bad or (not c.object and not org) or len(c.field) < (2 if org else 1):
             errors.append(f"Invalid change for role '{c.role}': give a role, object, field and value with plain characters (no quotes).")
         elif c.action == "modify" and (not c.current_value or c.current_value == c.value):
             errors.append(f"{c.role} {c.object}-{c.field}: a modify needs the current value and a different new value.")
@@ -72,6 +79,8 @@ def clean(raw: list[RoleChange], max_entries: int) -> tuple[list[RoleChange], li
     for c in out:
         if c.action == "add" and any(o.action == "remove" and (o.role, o.object, o.field, o.value) == (c.role, c.object, c.field, c.value) for o in out):
             errors.append(f"{c.role} {c.object}-{c.field} = {c.value} is both added and removed in this request.")
+        if c.action == "remove_tcode" and is_org(c):
+            errors.append(f"{c.role}: a transaction code cannot be an organization level.")
     return out, errors
 
 
@@ -84,13 +93,30 @@ def violations(changes: list[RoleChange], policy: dict) -> list[Violation]:
             out.append(Violation(role=c.role, object=c.object, policy=name, description=text))
         if c.role.startswith("SAP_"):
             v("SAP standard role protection", f"{c.role} is an SAP standard role. Copy it to a Z or Y role and change the copy.")
-        if c.object in restricted:
+        if c.object and c.object in restricted:
             v("Restricted authorization object", f"{c.object} is restricted: {restricted[c.object]}")
         if c.value == "*" and c.action in ("add", "modify"):
-            v("Wildcard value", f"The value '*' for {c.object}-{c.field} grants unrestricted access.")
+            v("Wildcard value", f"The value '*' for {c.object or 'the organization level'}-{c.field} grants unrestricted access.")
         if allowed and c.field == "ACTVT" and c.value not in allowed:
             v("Activity level allowlist", f"Activity {c.value} for {c.object} is not on the allowed list {sorted(allowed)}.")
     return out
+
+
+def _org_checks(role, orgs, rows, has_kids, errors) -> list[str]:
+    """Errors for organization-level changes (AGR_1252); the warnings are returned. Derived roles keep their own organization values."""
+    have = {(x["VARBL"].strip(), x["LOW"].strip()) for x in rows.rows}
+    levels = {v for v, _ in have}
+    for c in orgs:
+        name, old = c.field[1:], c.value if c.action == "remove" else c.current_value
+        if name not in levels:
+            errors.append(f"{role}: has no organization level {c.field}. Add the level in PFCG first.")
+        elif c.action == "add" and (name, c.value) in have:
+            errors.append(f"{role}: {c.field} already has the value {c.value}.")
+        elif c.action in ("remove", "modify") and (name, old) not in have:
+            errors.append(f"{role}: {c.field} does not have the value {old}.")
+        elif c.action == "modify" and (name, c.value) in have:
+            errors.append(f"{role}: {c.field} already has the new value {c.value}.")
+    return [f"{role} has derived roles. Their organization values are their own and are not changed: change them on each derived role if needed."] if has_kids else []
 
 
 async def _rows(ctx, table, fields, where):
@@ -124,12 +150,16 @@ async def review(ctx, raw: list[RoleChange], policy: dict, rules: list[dict], pr
 
     unverified, state = [], {}
     for r in ok_roles:                                  # live state of the values the request touches
-        mine = [c for c in changes if c.role == r]
+        mine = [c for c in changes if c.role == r and not is_org(c)]
+        orgs = [c for c in changes if c.role == r and is_org(c)]
         objs = sorted({c.object for c in mine})
-        t = await _rows(ctx, "AGR_1251", ["OBJECT", "FIELD", "LOW"], f"AGR_NAME = '{r}' AND DELETED = ' ' AND ( {any_of('OBJECT', objs)} )")
-        if t.truncated:
+        t = await _rows(ctx, "AGR_1251", ["OBJECT", "FIELD", "LOW"], f"AGR_NAME = '{r}' AND DELETED = ' ' AND ( {any_of('OBJECT', objs)} )") if objs else None
+        if t is not None and t.truncated:
             unverified.append(r)
-        state[r] = {(x["OBJECT"].strip(), x["FIELD"].strip(), x["LOW"].strip()) for x in t.rows}
+        state[r] = {(x["OBJECT"].strip(), x["FIELD"].strip(), x["LOW"].strip()) for x in t.rows} if t is not None else set()
+        if orgs:
+            levels = await _rows(ctx, "AGR_1252", ["VARBL", "LOW"], f"AGR_NAME = '{r}' AND ( {any_of('VARBL', sorted({c.field[1:] for c in orgs}))} )")
+            warnings += _org_checks(r, orgs, levels, bool(kids.get(r)), errors)
         menu = {x["TCODE"].strip() for x in (await _rows(ctx, "AGR_TCODES", ["TCODE"], f"AGR_NAME = '{r}' AND ( {any_of('TCODE', sorted({c.value for c in mine if c.action == 'remove_tcode'}))} )")).rows} \
             if any(c.action == "remove_tcode" for c in mine) else set()
         for c in mine:

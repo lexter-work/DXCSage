@@ -2,7 +2,7 @@ import pytest
 
 from sage.runtime.errors import WorkflowFailed
 from sage.sap.addon import current_patch, normalize, risk
-from sage.workflows.sap_addon_uninstall_guide import AddonInput, SapAddonUninstallGuide
+from sage.workflows.sap_addon_uninstall_guide import AddonInput, Classification, SapAddonUninstallGuide
 from tests.test_readiness import Clock, make_ctx
 
 
@@ -54,3 +54,46 @@ async def test_bad_input_refused(db, audit, rfc, settings_store, fake_rfc, tmp_p
     for bad in ([], ["A'B"], [f"C{i}" for i in range(11)]):
         with pytest.raises(WorkflowFailed):
             await run(db, audit, rfc, settings_store, tmp_path, bad)
+
+
+def deps(fake):
+    fake.lengths["CVERS_REF"] = {"COMPONENT": 30, "RELEASE": 10, "EXT_COMPONENT": 30, "EXT_RELEASE": 10}
+    fake.tables["CVERS_REF"] = [{"COMPONENT": "PERSONAS", "RELEASE": "300", "EXT_COMPONENT": "GBX01HR5", "EXT_RELEASE": "100"},
+                                {"COMPONENT": "GBX01HR5", "RELEASE": "100", "EXT_COMPONENT": "SAP_BASIS", "EXT_RELEASE": "750"},
+                                {"COMPONENT": "NOTINSTALLED", "RELEASE": "1", "EXT_COMPONENT": "GBX01HR5", "EXT_RELEASE": "100"}]
+
+
+async def test_dependencies_raise_risk_and_are_in_the_work_order(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    world(fake_rfc)
+    deps(fake_rfc)
+    g = (await run(db, audit, rfc, settings_store, tmp_path, ["GBX01HR5"])).components[0]
+    assert g.dependencies_checked and g.required_by == ["PERSONAS"] and g.requires == ["SAP_BASIS"] and g.risk == "HIGH"
+    assert "PERSONAS" in g.work_order and "must be removed or kept compatible first" in g.work_order
+
+
+async def test_unreadable_dependency_table_is_reported_not_fatal(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    world(fake_rfc)                                                   # no CVERS_REF in the fake: the read fails
+    out = await run(db, audit, rfc, settings_store, tmp_path, ["GBX01HR5"])
+    g = out.components[0]
+    assert not g.dependencies_checked and g.risk == "MEDIUM" and "could NOT be read" in g.work_order and "could not be read" in out.note
+
+
+async def test_the_model_is_asked_to_classify(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    world(fake_rfc)
+    out = await run(db, audit, rfc, settings_store, tmp_path, ["GBX01HR5", "SAP_BASIS"])
+    assert "CLASSIFICATION NEEDED for: GBX01HR5." in out.next_step and "your judgment, not a fact" in out.next_step      # the protected SAP_BASIS is not asked
+
+
+async def test_a_classification_is_shown_and_only_raises_the_risk(db, audit, rfc, settings_store, fake_rfc, tmp_path):
+    world(fake_rfc)
+    ctx = await make_ctx(db, audit, rfc, settings_store, tmp_path, Clock())
+    cl = [Classification(component="gbx01hr5", category="sap_core", reason="Looks like a base component.")]
+    out = await SapAddonUninstallGuide().run(ctx, AddonInput(system_name="TS3", components=["GBX01HR5"], classifications=cl))
+    g = out.components[0]
+    assert out.next_step == "" and g.risk == "HIGH" and g.classification.category == "sap_core" and any("AI judgment" in f for f in g.risk_factors)
+    assert "Classification (AI judgment, not a fact)" in g.work_order and "Looks like a base component." in g.work_order and g.category == "uninstallable"
+
+
+def test_category_changes_risk_but_never_lowers_it():
+    assert risk(0, [], "sap_core")[0] == "HIGH" and risk(0, [], "industry_solution")[0] == "MEDIUM" and risk(0, [], "partner_or_customer")[0] == "LOW"
+    assert risk(60, [], "sap_optional")[0] == "HIGH" and risk(11, [], "unknown")[0] == "MEDIUM"

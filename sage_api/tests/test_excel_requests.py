@@ -42,11 +42,12 @@ def test_user_roles_rows_synonyms_and_row_errors():
 def test_role_auth_actions_are_worked_out_and_actvt_is_padded():
     r = parse(book(["Role", "Object", "Field", "Current Value", "Requested Value", "Action"],
                    [["z_fi", "f_bkpf_buk", "actvt", 3, 2, None], ["z_fi", "f_bkpf_buk", "bukrs", None, "1000", ""], ["z_fi", "f_bkpf_buk", "bukrs", "2000", None, None],
-                    ["z_fi", "f_bkpf_buk", "$KOKRS", None, "1000", None], ["z_fi", "f_bkpf_buk", "bukrs", None, None, "add"]]))
+                    ["z_fi", "f_bkpf_buk", "$KOKRS", None, "1000", None], ["z_fi", "f_bkpf_buk", "bukrs", None, None, "add"], ["z_fi", None, "bukrs", None, "1", "add"]]))
     assert r["kind"] == "role_auth"
     assert r["rows"][0] == {"role": "Z_FI", "action": "modify", "object": "F_BKPF_BUK", "field": "ACTVT", "value": "02", "current_value": "03"}
-    assert [x["action"] for x in r["rows"]] == ["modify", "add", "remove"] and r["rows"][2]["value"] == "2000"
-    assert any("organization-level" in e for e in r["errors"]) and any("add needs" in e for e in r["errors"])
+    assert r["rows"][2]["value"] == "2000"
+    assert [x["action"] for x in r["rows"]] == ["modify", "add", "remove", "add"] and r["rows"][3] == {"role": "Z_FI", "action": "add", "object": "", "field": "$KOKRS", "value": "1000", "current_value": ""}
+    assert any("add needs" in e for e in r["errors"]) and any("Row 7" in e and "Object" in e for e in r["errors"])
 
 
 def test_tcode_layout_accepts_the_csv_of_the_obsolete_tcode_scan_and_bad_files_are_reported():
