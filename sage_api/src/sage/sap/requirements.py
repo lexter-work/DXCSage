@@ -267,7 +267,7 @@ class AuthCoverage(Requirement):
         async def account(obj):
             if obj not in cache:
                 try:
-                    res = await env.rfc.call(env.system_id, "SUSR_USER_AUTH_FOR_OBJ_GET", USER_NAME=env.rfc_user, SAP_OBJECT=obj)
+                    res = await env.rfc.call(env.system_id, "SUSR_USER_AUTH_FOR_OBJ_GET", USER_NAME=env.rfc_user, SEL_OBJECT=obj)
                 except RfcError:
                     cache[obj] = None
                 else:
