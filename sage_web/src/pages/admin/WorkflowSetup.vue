@@ -4,7 +4,10 @@ import { useRoute } from 'vue-router'
 import { get, post, put } from '../../api'
 import StatusPill from '../../components/StatusPill.vue'
 import Icon from '../../components/Icon.vue'
+import Drawer from '../../components/Drawer.vue'
 import { toast } from '../../toast'
+
+const source = ref<{ name: string; text: string } | null>(null)
 
 const { name, systemId } = useRoute().params as { name: string; systemId: string }
 const base = `api/workflows/${name}/systems/${systemId}`
@@ -137,7 +140,7 @@ onMounted(() => load().catch(toast))
             <span v-if="s.key && s.name !== s.key" class="x mono" style="font-size:12px">Object ID {{ s.key }}</span>
             <span class="x">{{ s.text }}</span>
             <span v-if="s.message" class="m">Last check: {{ s.message }}</span>
-            <details v-if="s.source_text"><summary>ABAP source ({{ s.source }})</summary><pre>{{ s.source_text }}</pre></details>
+            <span v-if="s.source_text" class="x"><button class="btn sm" @click="source = { name: s.source, text: s.source_text }">ABAP source ({{ s.source }})</button></span>
             <span v-if="s.kind === 'setting' && wf?.settings.length" class="x"><button class="btn sm" style="margin-top:6px" @click="($refs['set_' + s.key] as any)?.[0]?.focus()">Set {{ s.key.replace(/_/g, ' ') }}</button></span>
           </div>
         </template>
@@ -194,5 +197,9 @@ onMounted(() => load().catch(toast))
           <div class="in" style="padding-top:8px"><span class="help">Run the health check to compare these with the RFC user and list everything that is missing.</span></div></div>
       </div>
     </div>
+
+    <Drawer :open="!!source" :title="source ? `ABAP source (${source.name})` : ''" mono @close="source = null">
+      <pre>{{ source?.text }}</pre>
+    </Drawer>
   </section>
 </template>
