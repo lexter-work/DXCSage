@@ -156,6 +156,20 @@ def _covers(values: list[tuple[str, str]], wanted: str) -> bool:
     return False
 
 
+async def scan_function(rfc, system_id: int, fm: str, names: dict[str, str]) -> tuple[list[dict], list[str]]:
+    """Ask ZFM_AUTH_REQ_LIST what authorizations function module `fm` (an object ID) checks. Raises RfcError or ValueError."""
+    res = await rfc.call(system_id, SCAN_FM, IV_FUNCNAME=names.get(fm, fm), IV_MODE="S",
+                         IV_MAX_DEPTH=3, IV_INCL_STANDARD="", IV_TRACE_USER="")
+    errs = [str(m.get("MESSAGE", "")).strip() for m in res.get("ET_RETURN") or [] if m.get("TYPE") in ("E", "A")]
+    if errs:
+        raise RfcError("ABAP", "; ".join(errs))
+    try:
+        payload = json.loads(res.get("EV_JSON") or "{}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"unreadable scan result: {e}") from e
+    return payload.get("rows") or [], payload.get("unresolved") or []
+
+
 @dataclass(frozen=True)
 class AuthCoverage(Requirement):
     """Every authorization value the workflow needs, compared with the RFC account, all at once.
@@ -182,18 +196,13 @@ class AuthCoverage(Requirement):
         unresolved, scan_error = [], None
         for fm in self.fms:
             try:
-                res = await env.rfc.call(env.system_id, SCAN_FM, IV_FUNCNAME=env.names.get(fm, fm), IV_MODE="S",
-                                         IV_MAX_DEPTH=3, IV_INCL_STANDARD="", IV_TRACE_USER="")
-                errs = [str(m.get("MESSAGE", "")).strip() for m in res.get("ET_RETURN") or [] if m.get("TYPE") in ("E", "A")]
-                if errs:
-                    raise RfcError("ABAP", "; ".join(errs))
-                payload = json.loads(res.get("EV_JSON") or "{}")
-            except (RfcError, json.JSONDecodeError) as e:
+                scanned, unres = await scan_function(env.rfc, env.system_id, fm, env.names)
+            except (RfcError, ValueError) as e:
                 scan_error = getattr(e, "message", None) or str(e)
                 break
-            for row in payload.get("rows") or []:
+            for row in scanned:
                 add(str(row.get("auth_object", "")), str(row.get("auth_field", "")), str(row.get("auth_values", "")), fm)
-            unresolved += [f"{fm}: {u}" for u in payload.get("unresolved") or []]
+            unresolved += [f"{fm}: {u}" for u in unres]
 
         tables = [t for (k, t) in env.done if k == "table_readable"]
         tables_ok = bool(tables) and all(env.done[("table_readable", t)].status == "pass" for t in tables)

@@ -17,6 +17,7 @@ class TaskContext:
     binding: dict
     data_dir: Path | None
     system_label: str = ""
+    workflows: Any = None      # {name: Workflow class}; set for real runs so a workflow can inspect the installed ones
 
 
 class Task(ABC):

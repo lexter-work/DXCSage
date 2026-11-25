@@ -111,6 +111,10 @@ class SapRfc:
             except Exception:
                 pass
 
+    async def names(self, system_id: int) -> dict[str, str]:
+        """abap_object_id -> this system's name (only objects the admin renamed)."""
+        return await self._names(system_id) if self._names else {}
+
     async def call(self, system_id: int, fm: str, **params) -> dict:
         # fm is an abap_object_id; a system with its own naming convention maps it to its own name.
         if self._names:
