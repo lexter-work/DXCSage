@@ -125,6 +125,13 @@ class SapSsh:
             raise SshError("BAD_PATH", f"Not an allowed path: {path}")
         return (await self._run(system_id, f"test -r {shlex.quote(path)}")).code == 0
 
+    async def host_time(self, system_id: int) -> str:
+        """The clock of the host as YYYYMMDDHHMMSS in the host's own time zone (SUM writes its times in it)."""
+        r = await self._run(system_id, "date +%Y%m%d%H%M%S")
+        if r.code != 0 or not re.fullmatch(r"\d{14}", r.stdout.strip()):
+            raise SshError("READ", "Could not read the clock of the host.")
+        return r.stdout.strip()
+
     async def process_running(self, system_id: int, name: str) -> bool:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", name):
             raise SshError("BAD_PATH", f"Not an allowed process name: {name}")

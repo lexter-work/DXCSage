@@ -18,6 +18,7 @@ class TaskContext:
     data_dir: Path | None
     system_label: str = ""
     ssh: Any = None            # SapSsh, for tasks that read files on the host of the system
+    sid: str = ""
     workflows: Any = None      # {name: Workflow class}; set for real runs so a workflow can inspect the installed ones
 
 

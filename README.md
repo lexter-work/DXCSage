@@ -29,6 +29,7 @@ The model sees workflows only. Each one is built from shared tasks, and every ta
 | `sap_readiness_check` | Checks the prerequisite SAP Notes (downloads missing ones), schedules `RC_COLLECT_ANALYSIS_DATA`, waits for the job and downloads the ZIP. Long-running, survives restarts. | Schedules jobs | `ZFM_RC_NOTES_DOWNLOAD`, `ZFM_RC_START_ANALYSIS`, `ZFM_CHECK_JOB_STATUS`, `ZFM_RC_FETCH_ANALYSIS` | `readiness.prerequisite_notes`, default variant per system |
 | `sap_obsolete_tcodes` | Finds obsolete transaction codes in role menus (SU25 step 2D, all roles). Returns role and transaction pairs and a CSV. Long-running. | Schedules a job | `ZFM_RR_TC_OBS_START`, `ZFM_RR_TC_OBS_FETCH`, `ZFM_CHECK_JOB_STATUS` | none |
 | `sap_auth_requirements` | Lists the authorizations the RFC user needs for every installed workflow, or one. | No | `ZFM_AUTH_REQ_LIST` | none |
+| `sap_sum_status` | Reads the state of the SUM session on the host (running, waiting for input, error, possible hang, process dead, completed, offline) with phase, progress, estimated end and the next action. For an error it matches SAPup.log with 13 known signatures. Needs **optional SSH access** on the system. | No | none | none |
 | `sap_user_sod_check` | Checks one user's roles (composite roles expanded) for segregation-of-duties conflicts. | No | none | `sod.matrix` |
 | `sap_addon_uninstall_guide` | For up to 10 add-ons: uninstallable by SAINT, plugin class, object counts, risk, and a Basis work order. | No | none | `addon.protected_components` |
 | `sap_user_role_review` | Previews a request to assign or remove roles for users: validity, no-ops, SoD before and after. | No | none | `sod.matrix`, `rolechange.max_entries` |
@@ -40,6 +41,8 @@ Not ported from the old tool: the Excel upload and report steps, and the AI revi
 
 ### Setting up a workflow on a system
 Open the workflow on the Workflows page, choose the system and follow the setup guide. It lists every requirement (connection, function modules, tables, authorizations, settings) with its status. The ABAP objects page shows, for each custom object, its process flow, how to create it and the ABAP code to paste, using the names of the chosen system. Each system may name a custom object differently: enter its name in the guide and Sage keeps the fixed object ID. The health check compares every authorization a workflow needs with the RFC user, so you can send the security team one request with everything that is missing.
+
+SSH is optional and per system. An admin can add it when registering a system or later on its page: host, port, user, and a password or a private key without passphrase. Sage will not log in until an admin has compared and trusted the host key of the server. SSH is used only to read files and check processes on the host (for `sap_sum_status`); Sage runs no typed or model-written command. Starting and stopping SUM, and e-mail alerts, are not part of Sage.
 
 The two workflows that write to SAP ask the model to get the requester's confirmation first, and their reviews are the gate: a write never runs after a failed review. Test the write function modules in a sandbox client before any other system.
 

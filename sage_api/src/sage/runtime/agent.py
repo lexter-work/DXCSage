@@ -196,7 +196,7 @@ class AgentService:
             backoff = await self._settings.get("wait.backoff")
             max_wait = int(await self._settings.get("wait.max_wait"))
             task_ctx = TaskContext(system["id"] if system else None, self._rfc, self._settings, binding, self._data_dir,
-                                   system["label"] if system else "", self._ssh, self._workflows)
+                                   system["label"] if system else "", self._ssh, sid=system["sid"] if system else "", workflows=self._workflows)
 
             async def cancelled():
                 return bool((await self._run(run_id))["cancel_requested"])

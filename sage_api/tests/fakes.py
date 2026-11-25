@@ -74,6 +74,7 @@ class FakeSsh:
         self.user, self.secret = "sumadm", "ssh-pass-1"
         self.commands: list[str] = []
         self.down = False
+        self.now = "20260101120000"
 
     async def host_key(self, host, port):
         from sage.sap.ssh import SshError
@@ -103,6 +104,8 @@ class _FakeSshClient:
         argv = shlex.split(command)
         if argv[0] == "true":
             return SshResult("", "", 0)
+        if argv[0] == "date":
+            return SshResult(self.w.now + "\n", "", 0)
         if argv[0] == "test":
             return SshResult("", "", 0 if argv[-1] in self.w.files else 1)
         if argv[0] == "pgrep":
