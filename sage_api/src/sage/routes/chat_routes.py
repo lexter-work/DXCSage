@@ -59,7 +59,7 @@ async def list_chats(request: Request, user: dict = Depends(current_user)):
         "SELECT c.id,c.title,c.provider,c.model,c.created_at,"
         "(SELECT status FROM runs r WHERE r.chat_id=c.id ORDER BY r.id DESC LIMIT 1) AS last_run_status,"
         "(SELECT id FROM runs r WHERE r.chat_id=c.id ORDER BY r.id DESC LIMIT 1) AS last_run_id "
-        "FROM chats c WHERE c.user_id=? AND c.deleted_at IS NULL ORDER BY c.id DESC", (user["id"],))
+        "FROM chats c WHERE c.user_id=? AND c.deleted_at IS NULL AND c.provider<>'schedule' ORDER BY c.id DESC", (user["id"],))
 
 
 @router.post("/chats")

@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS system_ssh(
   system_id INTEGER PRIMARY KEY REFERENCES systems(id), host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL,
   auth TEXT NOT NULL CHECK(auth IN ('password','key')), secret_enc TEXT NOT NULL, host_key TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS schedules(
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, workflow TEXT NOT NULL, input TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('interval','daily')), interval_minutes INTEGER, at_time TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1, next_run_at TEXT, last_run_at TEXT, last_run_id INTEGER,
+  chat_id INTEGER NOT NULL REFERENCES chats(id), created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS email_groups(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, description TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL, created_at TEXT NOT NULL);

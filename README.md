@@ -52,7 +52,14 @@ Workflows can send an email when they change state.
 2. Email groups page: make groups of recipients. A member is just an email address, so people outside Sage can be added. Send a test email there.
 3. Workflows page, **Email notifications** on a workflow: tag one or more groups and choose the states: started, waiting (long runs), completed, failed, cancelled, and for a status workflow its result states (for example `sap_sum_status` can mail on ERROR, POSSIBLE_HANG or PROCESS_DEAD).
 
-An email states the workflow, the system, who asked, the state and, for a failure, the error text. It never contains results. Recipients get a blind copy, so they cannot see each other. A failed send never affects the run; it shows under Recent emails on the Email groups page. Each state of one run is mailed once, also after a restart. A workflow only mails when someone runs it, because Sage has no scheduler for recurring runs yet.
+An email states the workflow, the system, who asked, the state and, for a failure, the error text. It never contains results. Recipients get a blind copy, so they cannot see each other. A failed send never affects the run; it shows under Recent emails on the Email groups page. Each state of one run is mailed once, also after a restart. A result-state email (for example SUM is in ERROR) is sent only when that state differs from the previous run of the same workflow, system and input, so a schedule that keeps finding the same error mails once. To get emails without anyone asking, add a schedule.
+
+## Schedules
+The Schedules page runs a workflow again and again without a chat, as an admin account. Pick the workflow and system, fill in its other inputs, and choose every N minutes (5 to 10080) or daily at a time (UTC). Each run goes through the same checks, audit and email rules as a chat run, and appears on the Runs page under the schedule's name. Long-running workflows resume after a restart as usual. If the previous run is still going when the next is due, the new one is skipped. After downtime, a missed run happens once.
+
+Only read-only workflows can be scheduled: `sap_sum_status`, `sap_user_sod_check`, `sap_auth_requirements` and `sap_addon_uninstall_guide`. A workflow opts in with `schedulable = True`. The readiness check, the obsolete transaction scan and every workflow that changes SAP can only be run from a chat. Scheduled runs are not counted as user requests in the usage numbers.
+
+For monitoring, schedule `sap_sum_status` every 10 minutes, tag an email group to its `ERROR`, `POSSIBLE_HANG` and `PROCESS_DEAD` results, and enable email.
 
 ## Backups
 Back up both volumes: `sage_data` (SQLite) and `sage_keys` (the master key). The key alone is useless and the DB without the key cannot decrypt stored passwords.

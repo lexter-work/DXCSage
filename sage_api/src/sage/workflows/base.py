@@ -29,6 +29,7 @@ class Workflow(ABC):
     tasks: ClassVar[tuple[type[Task], ...]] = ()
     extra_requirements: ClassVar[tuple[Requirement, ...]] = ()
     binding_settings: ClassVar[tuple[SettingSpec, ...]] = ()
+    schedulable: ClassVar[bool] = False                # True only for read-only workflows that may run unattended on a schedule
     result_states: ClassVar[tuple[str, ...]] = ()      # states of the result an email rule may react to (see result_state)
 
     @classmethod

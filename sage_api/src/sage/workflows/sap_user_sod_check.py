@@ -30,6 +30,7 @@ class SapUserSodCheck(Workflow):
     description = ("Check whether one SAP user already has a toxic combination of access: reads the user's currently valid roles "
                    "(composite roles expanded) and their authorizations, and compares them with the SoD rule matrix. A conflict can "
                    "come from different roles. Read-only. Roles with a wildcard in S_TCODE are matched by exact value only.")
+    schedulable = True
     Input, Output = SodInput, SodOutput
     extra_requirements = tuple(TableReadable(t, guide=f"Allow reading {t} for the RFC user.") for t in ("USR02", "AGR_USERS", "AGR_AGRS", "AGR_1251"))
     tasks = ()

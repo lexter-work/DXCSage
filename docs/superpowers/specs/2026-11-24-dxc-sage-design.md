@@ -288,4 +288,12 @@ Added for SUM monitoring, whose state lives in files on the host, not in RFC-rea
 - **Rules:** `workflow_notifications(workflow, group_id, events)`. A workflow can have many groups. Events: `started`, `waiting` (durable workflows only), `completed`, `failed`, `cancelled`, and `result:<STATE>` for the states a workflow declares in `result_states` and reports through `result_state(output)`.
 - **Sending:** `AgentService` calls `EmailService.notify` at each transition of a workflow call. It queues a task, never raises and never blocks the run. `email_log` has a unique (tool call, event) pair, so a replay after a restart does not send twice. Recipients are a blind copy, and the To header is the from address.
 - **Content:** workflow, system, requester, state, run, time, and the error text of a failure. Never the output of a workflow, because groups may include people outside Sage.
-- **Not included:** recurring runs (so a status workflow mails only when someone runs it), and digest or throttled mail.
+- **Result states:** a `result:<STATE>` email is sent only when the state differs from the previous successful call of the same workflow, system and input, so recurring runs do not repeat it.
+- **Not included:** digest mail and hourly reminders while a state lasts.
+
+## Schedules (recurring runs)
+- **Table `schedules`:** name, workflow, input (JSON, validated against the workflow's Input), kind `interval` (5 to 10080 minutes) or `daily` (HH:MM UTC), enabled, next/last run, creator, and a hidden chat (provider `schedule`) that owns its runs. The chat list hides those chats.
+- **Only read-only workflows:** a workflow must set `schedulable = True`. Writing workflows and the long job-starting ones are not schedulable, because nobody confirms them.
+- **Execution:** the scheduler tick of `AgentService` starts a run (`provider = schedule`, no model, no tokens) for each due schedule, and `_drive_scheduled` runs the workflow through `_execute`, the same path as a chat run. So authorization, health check freshness, audit, steps, durable waiting, restart recovery and email rules all apply. The actor is `schedule:<name>`.
+- **Overlap and downtime:** a due schedule whose previous run is still running or waiting is skipped. After downtime a missed schedule runs once. "Run now" starts one run and leaves the timetable alone.
+- **Usage:** scheduled runs are not counted as user requests.

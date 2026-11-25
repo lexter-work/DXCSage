@@ -20,10 +20,10 @@ SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided 
 
 
 class AgentService:
-    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, clock=utcnow, poll_seconds=5):
+    def __init__(self, *, db, audit, settings, providers, workflows, setup, rfc, data_dir, usage, ssh=None, email=None, schedules=None, clock=utcnow, poll_seconds=5):
         self._db, self._audit, self._settings, self._providers = db, audit, settings, providers
         self._workflows, self._setup, self._rfc, self._data_dir, self._usage = workflows, setup, rfc, data_dir, usage
-        self._clock, self._poll, self._ssh, self._email = clock, poll_seconds, ssh, email
+        self._clock, self._poll, self._ssh, self._email, self._schedules = clock, poll_seconds, ssh, email, schedules
         self._tasks: dict[int, asyncio.Task] = {}
         self._scheduler: asyncio.Task | None = None
 
@@ -62,6 +62,8 @@ class AgentService:
         if run["status"] not in ("running", "waiting"):
             return
         await self._db.execute("UPDATE runs SET status='running', resume_at=NULL WHERE id=?", (run_id,))
+        if run["provider"] == "schedule":
+            return await self._drive_scheduled(run_id)
         try:
             await self._loop(run_id)
         except WorkflowSuspended:
@@ -76,10 +78,49 @@ class AgentService:
         await self._db.execute("UPDATE runs SET status=?, error=?, ended_at=?, resume_at=NULL WHERE id=?",
                                (status, error, iso(self._clock()), run_id))
         run = await self._run(run_id)
-        await self._usage.record_run(run_id)
+        if run["provider"] != "schedule":                      # scheduled runs have no chat and no tokens: not counted as a user request
+            await self._usage.record_run(run_id)
         await self._audit.write("run.end", "system", run_id, {"status": status, "error": error,
                                                               "tokens_in": run["tokens_in"], "tokens_out": run["tokens_out"]})
         await self._emit(run_id, {"done": "done", "failed": "error", "cancelled": "cancelled"}[status], {"error": error})
+
+    # ---- scheduled runs: the same workflow code as a chat run, without a model ----
+    async def run_schedule(self, schedule, advance=True) -> int | None:
+        """Start a run of a schedule. Returns None (and starts nothing) while its previous run is still going."""
+        if await self._schedules.active_run(schedule):
+            await self._schedules.triggered(schedule, None, advance)
+            return None
+        run_id = await self._db.execute(
+            "INSERT INTO runs(chat_id,user_id,provider,model,status,started_at) VALUES(?,?,'schedule','-','running',?)",
+            (schedule["chat_id"], schedule["created_by"], iso(self._clock())))
+        await self._audit.write("run.start", f"schedule:{schedule['name']}", run_id, {"schedule_id": schedule["id"], "workflow": schedule["workflow"]})
+        await self._schedules.triggered(schedule, run_id, advance)
+        self.launch(run_id)
+        return run_id
+
+    async def _drive_scheduled(self, run_id):
+        run = await self._run(run_id)
+        sched = await self._db.fetchone("SELECT * FROM schedules WHERE chat_id=?", (run["chat_id"],))
+        call = await self._db.fetchone("SELECT * FROM tool_calls WHERE run_id=?", (run_id,))
+        src = call or sched                                     # a resumed run keeps its own workflow and input, even if the schedule was edited or deleted
+        if src is None:
+            return await self._finish(run_id, "failed", "The schedule was deleted before the run started.")
+        user = await self._db.fetchone("SELECT * FROM users WHERE id=?", (run["user_id"],))
+        label = f"schedule:{sched['name']}" if sched else "schedule"
+        use = {"id": f"schedule-{run_id}", "name": src["workflow"], "input": json.loads(src["input"])}
+        try:
+            result = await self._execute(run_id, {**user, "username": label}, use, call)
+        except WorkflowSuspended:
+            return
+        except RunCancelled:
+            return await self._finish(run_id, "cancelled")
+        except Exception as e:  # noqa: BLE001
+            log.exception("scheduled run %s failed", run_id)
+            return await self._finish(run_id, "failed", str(e))
+        if result["is_error"]:
+            await self._finish(run_id, "failed", str(result["content"])[:500])
+        else:
+            await self._finish(run_id, "done")
 
     async def cancel(self, run_id, actor):
         run = await self._run(run_id)
@@ -173,6 +214,19 @@ class AgentService:
                 results.append(await self._execute(run_id, user, use, existing))
         return results
 
+    async def _state_changed(self, cls, workflow, call_id, state) -> bool:
+        """A repeated result (a schedule that finds the same ERROR every time) is mailed once, when it first appears."""
+        me = await self._db.fetchone("SELECT system_id,input FROM tool_calls WHERE id=?", (call_id,))
+        want = json.loads(me["input"])
+        for prev in await self._db.fetchall(
+                "SELECT input,output FROM tool_calls WHERE workflow=? AND system_id IS ? AND status='ok' AND id<? ORDER BY id DESC LIMIT 20", (workflow, me["system_id"], call_id)):
+            if json.loads(prev["input"]) == want:
+                try:
+                    return cls.result_state(cls.Output.model_validate_json(prev["output"])) != state
+                except Exception:  # noqa: BLE001
+                    return True
+        return True
+
     def _mail(self, workflow, event, call_id, run_id, system, actor, detail=""):
         if self._email:
             self._email.notify(workflow=workflow, event=event, tool_call_id=call_id, run_id=run_id, system=system, actor=actor, detail=detail)
@@ -217,7 +271,7 @@ class AgentService:
                                   is_cancelled=cancelled, emit=emit)
             out = await cls().run(ctx, data)
             output = out.model_dump_json()
-            if (state := cls.result_state(out)):
+            if (state := cls.result_state(out)) and await self._state_changed(cls, name, call_id, state):
                 self._mail(name, f"result:{state}", call_id, run_id, label, actor, getattr(out, "message", ""))
         except WorkflowSuspended as s:
             self._mail(name, "waiting", call_id, run_id, label, actor)
@@ -263,6 +317,9 @@ class AgentService:
         now = iso(self._clock())
         for r in await self._db.fetchall("SELECT id FROM runs WHERE status='waiting' AND resume_at<=?", (now,)):
             self.launch(r["id"])
+        if self._schedules:
+            for s in await self._schedules.due():
+                await self.run_schedule(s)
 
     def start_scheduler(self):
         async def loop():

@@ -28,6 +28,19 @@ def _svc(request):
     return request.app.state.services
 
 
+def _fields(cls) -> list[dict]:
+    """The inputs of a workflow besides the system, for forms that build an input (the schedule form)."""
+    schema = cls.Input.model_json_schema()
+    need = set(schema.get("required", []))
+    out = []
+    for k, v in schema.get("properties", {}).items():
+        if k == "system_name":
+            continue
+        kinds = {v.get("type")} | {a.get("type") for a in v.get("anyOf", [])}
+        out.append({"name": k, "required": k in need, "list": "array" in kinds, "label": v.get("title", k)})
+    return out
+
+
 @router.get("/workflows")
 async def list_workflows(request: Request, user: dict = Depends(current_user)):
     svc = _svc(request)
@@ -35,7 +48,8 @@ async def list_workflows(request: Request, user: dict = Depends(current_user)):
     out = []
     for name, cls in svc.workflows.items():
         item = {"name": name, "description": cls.description, "durable": cls.durable, "enabled": name not in disabled,
-                "settings": [s.model_dump() for s in cls.binding_settings], "bindings": []}
+                "settings": [s.model_dump() for s in cls.binding_settings], "bindings": [], "schedulable": cls.schedulable,
+                "input_fields": _fields(cls)}
         if user["role"] == "admin":
             item["bindings"] = await svc.setup.bindings(name)
         out.append(item)

@@ -50,6 +50,7 @@ class SapAddonUninstallGuide(Workflow):
                    "uninstall (PAT08), the deinstallation plugin class, how many repository objects and custom objects the "
                    "component's packages hold, and a risk level, and write a Basis work order (Maintenance Planner + /SAINT). "
                    "Read-only: nothing is uninstalled. Dependencies between components are not determined.")
+    schedulable = True
     Input, Output = AddonInput, AddonOutput
     tasks = (ReadTable,)
     extra_requirements = tuple(TableReadable(t, guide=f"Allow reading {t} for the RFC user.") for t in ("CVERS", "PAT03", "PAT08", "SEOCLASS", "TADIR"))

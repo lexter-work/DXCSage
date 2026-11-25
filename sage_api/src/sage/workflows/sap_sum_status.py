@@ -39,6 +39,7 @@ class SapSumStatus(Workflow):
                    "POSSIBLE_HANG, PROCESS_DEAD, COMPLETED or OFFLINE, with the phase, progress, estimated end and what to do next. For an "
                    "ERROR it matches the end of SAPup.log with known error signatures and gives the cause and the fix. Needs SSH access on "
                    "the system. Read-only: it never starts, stops or changes SUM.")
+    schedulable = True
     Input, Output = SystemInput, SumOutput
     tasks = (PollSum,)
     result_states = ("RUNNING", "WAITING_INPUT", "ERROR", "POSSIBLE_HANG", "PROCESS_DEAD", "COMPLETED", "OFFLINE", "UNKNOWN")

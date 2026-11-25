@@ -14,6 +14,7 @@ export const router = createRouter({
     { path: '/admin/systems', component: () => import('./pages/admin/Systems.vue'), meta: admin },
     { path: '/admin/workflows', component: () => import('./pages/admin/Workflows.vue'), meta: admin },
     { path: '/admin/workflows/:name/:systemId', component: () => import('./pages/admin/WorkflowSetup.vue'), meta: admin },
+    { path: '/admin/schedules', component: () => import('./pages/admin/Schedules.vue'), meta: admin },
     { path: '/admin/email', component: () => import('./pages/admin/EmailGroups.vue'), meta: admin },
     { path: '/admin/abap', component: () => import('./pages/admin/AbapObjects.vue'), meta: admin },
     { path: '/admin/health', component: () => import('./pages/admin/Health.vue'), meta: admin },

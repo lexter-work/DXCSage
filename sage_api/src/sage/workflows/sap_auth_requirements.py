@@ -35,6 +35,7 @@ class SapAuthRequirements(Workflow):
     description = ("List every SAP authorization object and value the RFC user needs on a registered system, for all installed "
                    "workflow tools or one of them, so they can be requested from the security team in one go. "
                    "Read-only. Does not compare with the user's current authorizations (the health check does that).")
+    schedulable = True
     Input, Output = AuthReqInput, AuthReqOutput
     tasks = (ScanAuth,)
 
