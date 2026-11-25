@@ -21,7 +21,9 @@ SYSTEM_PROMPT = ("You are DXC Sage, an assistant for SAP work. Use the provided 
                  "Requests to change user roles or role authorizations can come two ways. If the user attached an Excel file, its file_id is in the message: "
                  "pass it as file_id. Otherwise take the changes from what the user wrote and fill the changes list yourself, without asking for an Excel file. "
                  "Run the review workflow first and show its findings. Call a change workflow only after the user has confirmed the exact list. "
-                 "The user can download Excel templates from the Templates menu of the chat.")
+                 "The user can download Excel templates from the Templates menu of the chat. "
+                 "Every finished workflow call has an Excel report (its input, result and status) that the user downloads with the Download report button on the call card in the chat. "
+                 "When a result is long, or the user wants to keep or share it, tell them the report is there. You cannot attach, send or open it yourself.")
 
 
 class AgentService:

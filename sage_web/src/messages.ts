@@ -1,7 +1,7 @@
 export interface Msg { id: number; run_id: number | null; role: 'user' | 'assistant'; content: string }
 
 export interface CallDetail {
-  provider_call_id: string; workflow: string; status: string; started_at: string; ended_at: string | null
+  id?: number; provider_call_id: string; workflow: string; status: string; started_at: string; ended_at: string | null
   system: { label: string; sid: string; client: string } | null
   steps: { seq: number; kind: string; attempt: number; name: string; status: string; created_at: string }[]
 }
@@ -14,7 +14,7 @@ export type StepStatus = 'running' | 'waiting' | 'ok' | 'error'
 export interface StepView { seq: number; task: string; status: StepStatus; attempts: number; at?: string; ms?: number }
 export type ToolStatus = 'running' | 'waiting' | 'ok' | 'error'
 export type ToolItem = {
-  kind: 'tool'; id: string; name: string; input: any; output?: string; isError?: boolean
+  kind: 'tool'; id: string; callId?: number; name: string; input: any; output?: string; isError?: boolean
   status: ToolStatus; steps: StepView[]; runId?: number; system?: CallDetail['system']; startedAt?: string; endedAt?: string | null
 }
 export type Item = { kind: 'user'; text: string } | { kind: 'assistant'; text: string } | ToolItem
@@ -46,7 +46,7 @@ export function buildItems(messages: Msg[], hideRunId: number | null = null, inf
         const t: ToolItem = { kind: 'tool', id: b.id, name: b.name, input: b.input, status: 'running', steps: [], runId: m.run_id ?? undefined }
         const call = m.run_id != null ? info[m.run_id]?.tool_calls.find(c => c.provider_call_id === b.id) : undefined
         if (call) {
-          t.system = call.system; t.startedAt = call.started_at; t.endedAt = call.ended_at; t.steps = groupSteps(call.steps)
+          t.callId = call.id; t.system = call.system; t.startedAt = call.started_at; t.endedAt = call.ended_at; t.steps = groupSteps(call.steps)
           if (call.status === 'waiting') {
             t.status = 'waiting'
             const polled = [...t.steps].reverse().find(s => s.attempts)

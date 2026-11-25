@@ -6,6 +6,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from sage.deps import current_user
+from sage.report import build_report
 from sage.sap.excel_requests import KINDS, build_template
 from sage.uploads import UploadError
 from sage.util import iso
@@ -164,6 +165,30 @@ async def run_info(run_id: int, request: Request, user: dict = Depends(current_u
         c["system"] = {"label": sys_["label"], "sid": sys_["sid"], "client": sys_["client"]} if sys_ else None
     keep = ("id", "status", "started_at", "ended_at", "resume_at", "tokens_in", "tokens_out", "error")
     return {"run": {k: run[k] for k in keep}, "tool_calls": calls}
+
+
+@router.get("/tool-calls/{call_id}/report.xlsx")
+async def report(call_id: int, request: Request, user: dict = Depends(current_user)):
+    """The final report of one finished workflow call, built from its stored input and output. Same access as the run: its owner or an admin."""
+    svc = _svc(request)
+    call = await svc.db.fetchone("SELECT * FROM tool_calls WHERE id=?", (call_id,))
+    if not call:
+        raise HTTPException(404, "not_found")
+    run = await _own_run(svc, call["run_id"], user)
+    if call["status"] in ("running", "waiting"):
+        raise HTTPException(409, "not_finished")
+    sys_ = await svc.systems.get(call["system_id"]) if call["system_id"] else None
+    owner = await svc.db.fetchone("SELECT username FROM users WHERE id=?", (run["user_id"],))
+    try:
+        call_input = json.loads(call["input"] or "{}")
+    except ValueError:
+        call_input = {}
+    meta = {"workflow": call["workflow"], "call_id": call_id, "run_id": run["id"], "status": call["status"], "started_at": call["started_at"], "ended_at": call["ended_at"],
+            "system": f"{sys_['label']} ({sys_['sid']}, client {sys_['client']})" if sys_ else "", "requested_by": owner["username"] if owner else ""}
+    await svc.audit.write("report.download", user["username"], run["id"], {"tool_call_id": call_id, "workflow": call["workflow"]})
+    return Response(build_report(meta, call_input if isinstance(call_input, dict) else {}, call["output"]),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="sage-{call["workflow"].replace("_", "-")}-{call_id}.xlsx"'})
 
 
 @router.post("/runs/{run_id}/cancel")

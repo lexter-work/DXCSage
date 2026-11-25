@@ -27,7 +27,7 @@ onMounted(load)
       <template v-if="detail">
         <div v-if="detail.run.error" class="callout"><span><b>{{ detail.run.error }}</b></span></div>
         <div v-for="c in detail.tool_calls" :key="c.id" class="toolcard">
-          <div class="rowx"><b class="mono">{{ c.workflow }}</b><StatusPill :status="c.status" /></div>
+          <div class="rowx"><b class="mono">{{ c.workflow }}</b><StatusPill :status="c.status" /><span class="sp" /><a v-if="c.status === 'ok' || c.status === 'error'" class="btn sm" :href="`api/tool-calls/${c.id}/report.xlsx`" download>Report (.xlsx)</a></div>
           <pre>{{ c.input }}</pre>
           <div v-for="s in c.steps" :key="s.id" class="muted mono" style="margin-top:6px">{{ s.seq }} · {{ s.kind }} · {{ s.name }} · {{ s.status }}<span v-if="s.error"> · {{ s.error }}</span></div>
           <pre v-if="c.output">{{ c.output }}</pre>

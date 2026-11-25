@@ -45,7 +45,7 @@ async function loadRunInfo(id: number) {
   // Live cards come from events, which carry no system; match them to the stored calls in order.
   const calls = runInfo.value[id].tool_calls
   items.value.filter((i): i is ToolItem => i.kind === 'tool' && i.id.startsWith('live-') && i.runId === id)
-    .forEach((it, n) => { const c = calls[n]; if (c) { it.system = c.system; it.startedAt ??= c.started_at } })
+    .forEach((it, n) => { const c = calls[n]; if (c) { it.callId = c.id; it.system = c.system; it.startedAt ??= c.started_at } })
 }
 function rebuild() { items.value = buildItems(messages, activeRun.value, runInfo.value) }
 async function loadMessages() {
@@ -238,6 +238,7 @@ onBeforeUnmount(() => { closeStream(); clearInterval(tick); window.removeEventLi
               </li>
             </ol>
             <p v-else-if="it.status === 'running'" class="d0 muted">Starting the workflow.</p>
+            <div v-if="it.callId && (it.status === 'ok' || it.status === 'error')" class="rowx" style="padding:0 16px 10px"><a class="btn sm" :href="`api/tool-calls/${it.callId}/report.xlsx`" download>Download report (.xlsx)</a><span class="help">Input, result and status of this call.</span></div>
             <details class="io"><summary><Icon name="chev" />Input sent to the workflow</summary><pre>{{ JSON.stringify(it.input, null, 2) }}</pre></details>
             <details v-if="it.output" class="io"><summary><Icon name="chev" />{{ it.isError ? 'Error returned to the model' : 'Result returned to the model' }}</summary><pre>{{ it.output }}</pre></details>
           </article>
